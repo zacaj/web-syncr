@@ -1,0 +1,32 @@
+{
+  name: 'web-syncr',
+  version: '1.0.0',
+  description: '',
+  license: 'ISC',
+  author: 'zacaj',
+  main: 'index.js',
+  scripts: {
+    start: 'tsx src/server',
+  },
+  type: 'module',
+  dependencies: {
+    '@hono/node-server': '^1.19.9',
+    hono: '^4',
+    'http-proxy-middleware': '^3.0.5',
+    'jest-diff': '^30.2.0',
+  },
+  devDependencies: {
+    '@eslint/js': '^9.39.1',
+    '@stylistic/eslint-plugin': '^2.13.0',
+    '@types/node': '^22',
+    'better-typescript-lib': '^2.12.0',
+    eslint: '^9.39.1',
+    'eslint-plugin-json': '*',
+    tsx: '^4.21.0',
+    typescript: '^5.9.3',
+    'typescript-eslint': '^8',
+  },
+  engines: {
+    node: '>=24',
+  },
+}

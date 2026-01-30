@@ -1,0 +1,16 @@
+{
+  "extends": "./common/tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "./",
+    "paths": {
+      "~/*": [
+        "./src/*"
+      ],
+      "@common/*": [
+        "./common/*"
+      ],
+    },
+    "composite": false,
+  },
+  "include": ["**/*"],
+}

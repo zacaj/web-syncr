@@ -1,0 +1,36 @@
+dist
+.solid
+.output
+.vercel
+.netlify
+netlify
+
+# dependencies
+/node_modules
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+*.launch
+.settings/
+
+# Temp
+gitignore
+
+# System Files
+.DS_Store
+Thumbs.db
+
+.env
+
+# custom
+build/
+.pnpm-store
+node_modules
+common
+*.tsbuildinfo
+.vinxi
+tmp*
+
+# per project:

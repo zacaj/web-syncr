@@ -1,0 +1,37 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/typescript-node
+{
+	"name": "Node.js & TypeScript",
+	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+	"image": "mcr.microsoft.com/devcontainers/typescript-node:dev-24-bookworm",
+
+	"features": {
+    "ghcr.io/devcontainers-extra/features/pnpm:2": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers-extra/features/mkcert:1": {},
+  },
+  "postCreateCommand": {
+    "deps": "pnpm i",
+  },
+  "customizations": {
+    "vscode": {
+      "settings": { },
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "blueglassblock.better-json5"
+      ]
+    }
+  },
+  "mounts": [
+    {
+      "source": "${localWorkspaceFolder}/../common",
+      "target": "${containerWorkspaceFolder}/common",
+      "type": "bind"
+    }
+  ],
+  "runArgs": ["-p", "29443:443"],
+	// "forwardPorts": [
+  //   "29443:443"
+  // ],
+}
