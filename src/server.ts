@@ -1,4 +1,4 @@
-import { lastJsonL } from "@common/util/files";
+import { appendJsonL, lastJsonL } from "@common/util/files";
 import { diffText } from "@common/util/primitives";
 import { serve } from "@hono/node-server";
 import "common/util/index";
@@ -46,31 +46,43 @@ server.all(`*`, async (c) => {
 
   let [sessionIdOrBaseUrl, baseUrl] = subdomain.split(`_`, 2);
   let sessionId = sessionIdOrBaseUrl;
-  if (!baseUrl && sessionIdOrBaseUrl?.includes(``)) {
+  if (!baseUrl && sessionIdOrBaseUrl?.includes(`.`)) {
     sessionId = undefined;
     baseUrl = sessionIdOrBaseUrl;
   }
   let session: Session|null;
   let realUrl: string;
   if (sessionId) {
+    const _session = lastJsonL<Session>(`./db/sesson_${sessionId}.jsonl`, null);
     if (!baseUrl) {
-      const _session = lastJsonL<Session>(`./db/sesson_${sessionId}.jsonl`, null);
       if (!_session)
         return c.text(`Invalid session "`+sessionId+`"`);
 
       session = _session;
       realUrl = session.url;
       baseUrl = new URL(realUrl).host;
+      const newURL = new URL(realUrl);
+      newURL.host = `${sessionId}_${baseUrl}.${env.publicHost}:${env.publicPort}`;
+      return c.redirect(newURL);
     }
     else {
       const newUrl = new URL(req.url);
       newUrl.host = baseUrl+`:${env.localPort}`;
       newUrl.protocol = `https:`;
       realUrl = newUrl.toString();
-      session = {
-        url: newUrl.toString(),
-        timestamp: jsonDate(),
-      };
+      const isPage = req.header(`Sec-Fetch-Mode`) === `navigate`;
+      if (isPage && _session?.url !== realUrl) {
+        console.warn(`Update session ${sessionId} to ${realUrl}`);
+        session = appendJsonL<Session>(`./db/sesson_${sessionId}.jsonl`, {
+          url: realUrl,
+          timestamp: jsonDate(),
+        });
+      }
+      else
+        session = _session?.url !== newUrl.toString() ? {
+          url: newUrl.toString(),
+          timestamp: jsonDate(),
+        } : _session;
     }
   }
   else {
