@@ -7,6 +7,16 @@
   main: "index.js",
   scripts: {
     start: "tsx src/server",
+    build: "tsc --noEmitOnError --noEmit false",
+    "docker:build": "docker build -t web-syncr --progress=plain --target dev .",
+    "docker:build:prod": "docker build -t web-syncr --progress=plain --target prod .",
+    "docker:run": "docker run -p 443:443 web-syncr",
+    "docker:start": "pnpm docker:build && pnpm docker:run",
+    "docker:start:prod": "pnpm docker:build:prod && pnpm docker:run",
+    "docker:push": "docker save web-syncr | pv | ssh -C zacaj@git.zacaj.com -p 1022 docker load",
+    "docker:build_push": "pnpm docker:build && pnpm docker:push",
+    "docker:start_push": "pnpm docker:build_push && pnpm docker:compose",
+    "docker:compose": "ssh -C zacaj@git.zacaj.com -p 1022 'cd /home/zacaj/web-syncr && docker compose up'",
   },
   type: "module",
   dependencies: {
