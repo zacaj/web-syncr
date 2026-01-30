@@ -1,4 +1,4 @@
-import { appendJsonL, lastJsonL } from "@common/util/files";
+import { appendJsonL, findJsonL, lastJsonL } from "@common/util/files";
 import { diffText } from "@common/util/primitives";
 import { serve } from "@hono/node-server";
 import "common/util/index";
@@ -53,8 +53,13 @@ server.all(`*`, async (c) => {
   let session: Session|null;
   let realUrl: string;
   if (sessionId) {
-    const _session = lastJsonL<Session>(`./db/sesson_${sessionId}.jsonl`, null);
-    if (!baseUrl) {
+    const sessionPath = `./db/sesson_${sessionId}.jsonl`;
+    const _session = lastJsonL<Session>(sessionPath, null);
+    if (_session)
+      _session.url = new URL(_session.url).toString();
+
+    if (!baseUrl || _url.pathname.length <= 1) {
+      // load existing session
       if (!_session)
         return c.text(`Invalid session "`+sessionId+`"`);
 
@@ -70,10 +75,19 @@ server.all(`*`, async (c) => {
       newUrl.host = baseUrl+`:${env.localPort}`;
       newUrl.protocol = `https:`;
       realUrl = newUrl.toString();
-      const isPage = req.header(`Sec-Fetch-Mode`) === `navigate`;
+      const prevSession = await findJsonL<Session>(sessionPath, s => new URL(s.url).toString() === realUrl && s.timestamp !== _session?.timestamp);
+      const isPage = req.header(`Sec-Fetch-Mode`) === `navigate` && newUrl.pathname.length > 1;
       if (isPage && _session?.url !== realUrl) {
+        const isNotRefresh = req.header(`Sec-Purpose`) === `prefetch` || (req.header(`Cache-Control`) && req.header(`Cache-Control`)!==`no-cache`);
+        const isRefresh = req.header(`Referer`) === req.url || req.header(`Refresh`);
+        if (prevSession && _session && (!isNotRefresh || isRefresh)) {
+          console.warn(`Reloaded older session on ${realUrl}, redirecting to newest ${_session.url}`);
+          const newURL = new URL(_session.url);
+          newURL.host = `${sessionId}_${baseUrl}.${env.publicHost}:${env.publicPort}`;
+          return c.redirect(newURL);
+        }
         console.warn(`Update session ${sessionId} to ${realUrl}`);
-        session = appendJsonL<Session>(`./db/sesson_${sessionId}.jsonl`, {
+        session = appendJsonL<Session>(sessionPath, {
           url: realUrl,
           timestamp: jsonDate(),
         });
