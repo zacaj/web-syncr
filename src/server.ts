@@ -2,7 +2,7 @@ import { appendJsonL, findJsonL, lastJsonL } from "@common/util/files";
 import { diffText } from "@common/util/primitives";
 import { serve } from "@hono/node-server";
 import "common/util/index";
-import { jsonDate, type JsonDate, type Opaque } from "common/util/index";
+import { jsonDate, zid, type JsonDate, type Opaque } from "common/util/index";
 import { Hono } from 'hono';
 import { basicAuth } from 'hono/basic-auth';
 import { logger } from 'hono/logger';
@@ -33,6 +33,16 @@ type Session = {
   timestamp: JsonDate;
 };
 
+server.post(`/`, async c => {
+  const { url } = await c.req.parseBody<{ url: string }>();
+  const sessionId = zid(`SN`).toLowerCase();
+  appendJsonL<Session>(sessionPath(sessionId), {
+    url,
+    timestamp: jsonDate(),
+  });
+  return c.redirect(realUrlToWrapped(url, sessionId));
+});
+
 server.all(`*`, async (c) => {
   const { req } = c;
   // const url = req.path.match(/(https?:\/\/.*$)/)?.[1];
@@ -40,6 +50,15 @@ server.all(`*`, async (c) => {
   //   return c.text(`Couldn't find URL in '${req.url}'`);
 
   const _url = new URL(req.url);
+  if (!_url.hostname.includes(`.${env.publicHost}`)) {
+    return c.html(`
+<p>No base URL or session id found in ${_url}</p>
+<form action="/" method="post">
+  <input type="url" name="url" placeholder="URL to sync" />
+  <button type="submit">Go</button>
+</form>
+    `);
+  }
   const subdomain = _url.hostname.split(`.${env.publicHost}`)[0];
   if (!subdomain)
     return c.text(`No subdomain found on `+_url);
@@ -53,8 +72,7 @@ server.all(`*`, async (c) => {
   let session: Session|null;
   let realUrl: string;
   if (sessionId) {
-    const sessionPath = `./db/sesson_${sessionId}.jsonl`;
-    const _session = lastJsonL<Session>(sessionPath, null);
+    const _session = lastJsonL<Session>(sessionPath(sessionId), null);
     if (_session)
       _session.url = new URL(_session.url).toString();
 
@@ -63,31 +81,30 @@ server.all(`*`, async (c) => {
       if (!_session)
         return c.text(`Invalid session "`+sessionId+`"`);
 
-      session = _session;
-      realUrl = session.url;
-      baseUrl = new URL(realUrl).host;
-      const newURL = new URL(realUrl);
-      newURL.host = `${sessionId}_${baseUrl}.${env.publicHost}:${env.publicPort}`;
-      return c.redirect(newURL);
+      // session = _session;
+      // realUrl = session.url;
+      // baseUrl = new URL(realUrl).host;
+      // const newURL = new URL(realUrl);
+      // newURL.host = `${sessionId}_${baseUrl}.${env.publicHost}:${env.publicPort}`;
+      return c.redirect(realUrlToWrapped(_session.url, sessionId));
     }
     else {
       const newUrl = new URL(req.url);
       newUrl.host = baseUrl+`:${env.localPort}`;
       newUrl.protocol = `https:`;
       realUrl = newUrl.toString();
-      const prevSession = await findJsonL<Session>(sessionPath, s => new URL(s.url).toString() === realUrl && s.timestamp !== _session?.timestamp);
+      const prevSession = await findJsonL<Session>(sessionPath(sessionId), s => new URL(s.url).toString() === realUrl && s.timestamp !== _session?.timestamp);
       const isPage = req.header(`Sec-Fetch-Mode`) === `navigate` && newUrl.pathname.length > 1;
       if (isPage && _session?.url !== realUrl) {
         const isNotRefresh = req.header(`Sec-Purpose`) === `prefetch` || (req.header(`Cache-Control`) && req.header(`Cache-Control`)!==`no-cache`);
         const isRefresh = req.header(`Referer`) === req.url || req.header(`Refresh`);
         if (prevSession && _session && (!isNotRefresh || isRefresh)) {
           console.warn(`Reloaded older session on ${realUrl}, redirecting to newest ${_session.url}`);
-          const newURL = new URL(_session.url);
-          newURL.host = `${sessionId}_${baseUrl}.${env.publicHost}:${env.publicPort}`;
+          const newURL = realUrlToWrapped(_session.url, sessionId);
           return c.redirect(newURL);
         }
         console.warn(`Update session ${sessionId} to ${realUrl}`);
-        session = appendJsonL<Session>(sessionPath, {
+        session = appendJsonL<Session>(sessionPath(sessionId), {
           url: realUrl,
           timestamp: jsonDate(),
         });
@@ -168,3 +185,16 @@ serve({
   }}, (info) => {
   console.log(`Server started on https://${env.publicHost}:${env.publicPort}`);
 });
+
+
+function sessionPath(sessionId: string) {
+  return `./db/session_${sessionId}.jsonl`;
+}
+
+function realUrlToWrapped(realUrl: string, sessionId: string) {
+  const newURL = new URL(realUrl);
+  const baseUrl = new URL(realUrl).host;
+  newURL.host = `${sessionId.toLowerCase()}_${baseUrl}.${env.publicHost}:${env.publicPort}`;
+  return newURL;
+}
+
