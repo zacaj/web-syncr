@@ -27,6 +27,9 @@ const env = {
   localPort: 443,
   publicPort: 29443,
   publicHost: `localhost`,
+  httpsKey: undefined as string|undefined,
+  httpsCert: undefined as string|undefined,
+  ...process.env,
 };
 
 type Session = {
@@ -59,7 +62,7 @@ server.all(`*`, async (c) => {
     return c.html(`
 <p>No base URL or session id found in ${_url}</p>
 <form action="/" method="post">
-  <input type="url" name="url" placeholder="URL to sync" />
+  <input type="url" name="url" placeholder="URL to sync" style="width: 100%" />
   <button type="submit">Go</button>
 </form>
     `);
@@ -74,6 +77,7 @@ server.all(`*`, async (c) => {
     sessionId = undefined;
     baseUrl = sessionIdOrBaseUrl;
   }
+  baseUrl = baseUrl?.replaceAll(/([^_])_([^_])/g, `$1.$2`);
   let session: Session|null;
   let realUrl: string;
   if (sessionId) {
@@ -198,9 +202,8 @@ serve({
   createServer,
   port: env.localPort,
   serverOptions: {
-    key: readFileSync(`./common/.config/localhost-key.pem`, `utf8`),
-    cert: readFileSync(`./common/.config/localhost-cert.pem`, `utf8`),
-
+    key: env.httpsKey? readFileSync(env.httpsKey, `utf8`) : undefined,
+    cert: env.httpsCert? readFileSync(env.httpsCert, `utf8`) : undefined,
   }}, (info) => {
   console.log(`Server started on https://${env.publicHost}:${env.publicPort}`);
 });
@@ -213,7 +216,7 @@ function sessionPath(sessionId: string) {
 function realUrlToWrapped(realUrl: string, sessionId: string, publicHost: string) {
   const newURL = new URL(realUrl);
   const baseUrl = new URL(realUrl).host;
-  newURL.host = `${sessionId.toLowerCase()}__${baseUrl}__.${publicHost}`;
+  newURL.host = `${sessionId.toLowerCase()}__${baseUrl.replaceAll(/([^.])\.([^.])/g, `$1_$2`)}__.${publicHost}`;
   return newURL;
 }
 

@@ -27,7 +27,7 @@ EXPOSE 443
 # ENV NODE_PATH=/app/build
 CMD [ "node", "/app/build/src/server.js" ]
 
-FROM base as dev
+FROM base AS dev
 COPY --from=dev-deps /app/node_modules /app/node_modules
 # RUN ln -s /app/build/common '/app/node_modules/@common'
 # RUN ln -s /app/build/common '/app/node_modules/common'
