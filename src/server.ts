@@ -51,6 +51,8 @@ server.post(`/`, async c => {
   return c.redirect(realUrlToWrapped(url, sessionId, publicHost));
 });
 
+console.log(`Version: 9`);
+
 server.all(`*`, async (c) => {
   const { req } = c;
   // const url = req.path.match(/(https?:\/\/.*$)/)?.[1];
@@ -60,7 +62,7 @@ server.all(`*`, async (c) => {
   const _url = new URL(req.url);
   if (!_url.host.includes(`__.`) || _url.host.startsWith(`__.`)) {
     return c.html(`
-<p>No base URL or session id found in ${_url}</p>
+<p>No base URL or session id found in ${_url}.</p><p>Would you like to start a new session?</p>
 <form action="/" method="post">
   <input type="url" name="url" placeholder="URL to sync" style="width: 100%" />
   <button type="submit">Go</button>
@@ -205,7 +207,7 @@ serve({
     key: env.httpsKey? readFileSync(env.httpsKey, `utf8`) : undefined,
     cert: env.httpsCert? readFileSync(env.httpsCert, `utf8`) : undefined,
   }}, (info) => {
-  console.log(`Server started on https://${env.publicHost}:${env.publicPort}`);
+  console.log(`Server started on https://${env.publicHost}:${env.publicPort} / https://localhost:${env.localPort}`);
 });
 
 

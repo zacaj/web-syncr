@@ -8,15 +8,17 @@
   scripts: {
     start: "tsx src/server",
     build: "tsc --noEmitOnError --noEmit false",
-    "docker:build": "docker build -t web-syncr --progress=plain --target dev .",
+    "docker:build": "docker build -t web-syncr --target dev --progress=plain .", //  --progress=plain --output type=docker,compression=uncompressed 
     "docker:build:prod": "docker build -t web-syncr --progress=plain --target prod .",
     "docker:run": "docker run -p 443:443 web-syncr",
     "docker:start": "pnpm docker:build && pnpm docker:run",
     "docker:start:prod": "pnpm docker:build:prod && pnpm docker:run",
+    "docker:push:registry": "docker tag web-syncr registry.zacaj.com:29413/web-syncr:latest && docker image push registry.zacaj.com:29413/web-syncr:latest",
     "docker:push": "docker save web-syncr | pv | ssh -C zacaj@git.zacaj.com -p 1022 docker load",
-    "docker:build_push": "pnpm docker:build && pnpm docker:push",
+    // "docker:build_push": "pnpm docker:build && pnpm docker:push",
+    "docker:build_push": "docker build --target dev --push . -t registry.zacaj.com:29413/web-syncr", // && pnpm docker:push
     "docker:start_push": "pnpm docker:build_push && pnpm docker:compose",
-    "docker:compose": "ssh -C zacaj@git.zacaj.com -p 1022 'cd /home/zacaj/web-syncr && docker compose up'",
+    "docker:compose": "ssh -C zacaj@git.zacaj.com -p 1022 'cd /home/zacaj/web-syncr && docker compose up -d --force-recreate --pull always'", //  --pull always
   },
   type: "module",
   dependencies: {
