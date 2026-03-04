@@ -12,7 +12,9 @@ import { proxy } from 'hono/proxy';
 import { RegExpRouter } from 'hono/router/reg-exp-router';
 import type { BlankEnv, BlankInput, H } from "hono/types";
 import { existsSync, readFile, readFileSync } from "node:fs";
+import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
+import * as Path from 'node:path';
 import { renderToStringAsync } from "preact-render-to-string";
 import { Header } from "./Header";
 import { Home } from "./Home";
@@ -67,6 +69,7 @@ const ignoreProxy: H<BlankEnv, any, BlankInput, any> = async (c) => {
   }
 };
 server.get(`/favicon.ico`, ignoreProxy);
+server.get(`/robots.txt`, ignoreProxy);
 server.get(`/.well-known/*`, ignoreProxy);
 server.get(`/**/*.js`, ignoreProxy);
 
@@ -75,7 +78,7 @@ server.use(`*`, logger());
 server.onError((err, c) => {
   const traceId = zid(`TR`);
   console.error(`${traceId}: ${err}`, err);
-  return c.text(`Custom Error Message.  ${traceId}`, 500);
+  return c.text(`Error loading URL, traceId: ${traceId}\n${err}`, 500);
 });
 
 const env = {
@@ -236,8 +239,23 @@ server.all(`*`, async (c) => {
   });
   const originalResponse = response.clone();
 
+  // const buffer = await response.text();
+  // const body = new TextDecoder().decode(buffer);
   const body = await response.text();
   const originalBody = body;
+
+  try {
+    let path = Path.join(`./db/session_${sessionId}`, new URL(realUrl).pathname);
+    if (path.endsWith(`/`))
+      path += `index.html`;
+    if (!existsSync(path)) {
+      console.info(`Save ${realUrl} to ${path}`);
+      await mkdir(Path.dirname(path), { recursive: true });
+      await writeFile(path, body);
+    }
+  } catch (err) {
+    console.error(`Error saving ${realUrl}:`, err);
+  }
 
   const replacements: Dict<string> = {};
   replacements[baseUrl] ??= `${subdomain}__.${publicHost}`;

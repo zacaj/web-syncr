@@ -13,11 +13,14 @@
     "docker:run": "docker run -p 443:443 web-syncr",
     "docker:start": "pnpm docker:build && pnpm docker:run",
     "docker:start:prod": "pnpm docker:build:prod && pnpm docker:run",
-    "docker:push:registry": "docker tag web-syncr registry.zacaj.com:29413/web-syncr:latest && docker image push registry.zacaj.com:29413/web-syncr:latest",
+    "docker:tag": "docker tag web-syncr registry.zacaj.com:29413/web-syncr:${DTV:-latest}",
+    "docker:tag:push_registry": "pnpm docker:tag && pnpm docker:push:registry",
+    "docker:push:registry": "docker image push registry.zacaj.com:29413/web-syncr:${DTV:-latest}",
     "docker:push": "docker save web-syncr | pv | ssh -C zacaj@git.zacaj.com -p 1022 docker load",
     // "docker:build_push": "pnpm docker:build && pnpm docker:push",
-    "docker:build_push": "docker build --target dev --push . -t registry.zacaj.com:29413/web-syncr", // && pnpm docker:push
+    "docker:build_push": "docker build --target dev --push . -t registry.zacaj.com:29413/web-syncr:${DTV:-latest}", // && pnpm docker:push
     "docker:start_push": "pnpm docker:build_push && pnpm docker:compose",
+    "docker:set-tag": "ssh -C zacaj@git.zacaj.com -p 1022 \"sed -E \\\"s/(\\/web-syncr:).*/\\1$DTV/\\\" -i.bak /home/zacaj/web-syncr/docker-compose.yml\"",
     "docker:compose": "ssh -C zacaj@git.zacaj.com -p 1022 'cd /home/zacaj/web-syncr && docker compose up -d --force-recreate --pull always'", //  --pull always
   },
   type: "module",
