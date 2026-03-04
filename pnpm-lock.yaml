@@ -9,23 +9,29 @@ importers:
   .:
     dependencies:
       '@hono/node-server':
-        specifier: ^1.19.9
+        specifier: ^1.19
         version: 1.19.9(hono@4.11.7)
       hono:
         specifier: ^4
         version: 4.11.7
       http-proxy-middleware:
-        specifier: ^3.0.5
+        specifier: ^3
         version: 3.0.5
       jest-diff:
-        specifier: ^30.2.0
+        specifier: ^30
         version: 30.2.0
+      preact:
+        specifier: ^10
+        version: 10.28.3
+      preact-render-to-string:
+        specifier: ^6
+        version: 6.6.5(preact@10.28.3)
     devDependencies:
       '@eslint/js':
-        specifier: ^9.39.1
+        specifier: ^9
         version: 9.39.2
       '@stylistic/eslint-plugin':
-        specifier: ^2.13.0
+        specifier: ^2
         version: 2.13.0(eslint@9.39.2)(typescript@5.9.3)
       '@types/node':
         specifier: ^24
@@ -34,16 +40,16 @@ importers:
         specifier: ^2.12.0
         version: 2.12.0(typescript@5.9.3)
       eslint:
-        specifier: ^9.39.1
+        specifier: ^9
         version: 9.39.2
       eslint-plugin-json:
         specifier: '*'
         version: 4.0.1
       tsx:
-        specifier: ^4.21.0
+        specifier: ^4
         version: 4.21.0
       typescript:
-        specifier: ^5.9.3
+        specifier: ^5.9
         version: 5.9.3
       typescript-eslint:
         specifier: ^8
@@ -776,6 +782,14 @@ packages:
   picomatch@4.0.3:
     resolution: {integrity: sha512-5gTmgEY/sqK6gFXLIsQNH19lWb4ebPDLA4SdLP7dsWkIXHWlG66oPuVvXSGFPppYZz8ZDZq0dYYrbHfBCVUb1Q==}
     engines: {node: '>=12'}
+
+  preact-render-to-string@6.6.5:
+    resolution: {integrity: sha512-O6MHzYNIKYaiSX3bOw0gGZfEbOmlIDtDfWwN1JJdc/T3ihzRT6tGGSEWE088dWrEDGa1u7101q+6fzQnO9XCPA==}
+    peerDependencies:
+      preact: '>=10 || >= 11.0.0-0'
+
+  preact@10.28.3:
+    resolution: {integrity: sha512-tCmoRkPQLpBeWzpmbhryairGnhW9tKV6c6gr/w+RhoRoKEJwsjzipwp//1oCpGPOchvSLaAPlpcJi9MwMmoPyA==}
 
   prelude-ls@1.2.1:
     resolution: {integrity: sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g==}
@@ -1588,6 +1602,12 @@ snapshots:
   picomatch@2.3.1: {}
 
   picomatch@4.0.3: {}
+
+  preact-render-to-string@6.6.5(preact@10.28.3):
+    dependencies:
+      preact: 10.28.3
+
+  preact@10.28.3: {}
 
   prelude-ls@1.2.1: {}
 

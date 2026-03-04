@@ -6,6 +6,12 @@
 	"image": "mcr.microsoft.com/devcontainers/typescript-node:dev-24-bookworm",
 
 	"features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "installDockerBuildx": true,
+      "installDockerComposeSwitch": true,
+      "version": "latest",
+      "dockerDashComposeVersion": "v2"
+    },
     "ghcr.io/devcontainers-extra/features/pnpm:2": {
       "version": "latest"
     },
@@ -32,6 +38,6 @@
   ],
   "runArgs": ["-p", "29443:443"],
 	// "forwardPorts": [
-  //   "29443:443"
+  //   29443
   // ],
 }

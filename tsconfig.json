@@ -11,6 +11,16 @@
       ],
     },
     "composite": false,
+    // "types": [
+    //   "preact",
+    //   "node",
+    // ],
+    "jsx": "react",
+    "jsxFactory": "h",
+    "typeRoots": [
+      "./node_modules/@types",
+      "./node_modules",
+    ],
   },
   "include": ["**/*"],
 }

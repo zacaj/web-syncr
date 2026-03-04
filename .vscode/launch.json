@@ -8,6 +8,7 @@
       "type": "node",
       "request": "launch",
       "name": "start",
+      "envFile": "${workspaceFolder}/.env",
       "skipFiles": [
         "<node_internals>/**"
       ],
