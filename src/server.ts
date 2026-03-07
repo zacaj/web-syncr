@@ -1,10 +1,19 @@
 import { serve } from "@hono/node-server";
-import { appendJsonL, findJsonL, lastJsonL, lastJsonLs } from "common/util/files";
+import { appendJsonL, findJsonL, lastJsonL, lastJsonLs, listFiles, readJsonL } from "common/util/files";
 import "common/util/index";
 import { jsonDate, zid, type JsonDate, type Opaque } from "common/util/index";
 import { diffText } from "common/util/primitives";
 import { Hono } from 'hono';
 import { basicAuth } from 'hono/basic-auth';
+import {
+  deleteCookie,
+  generateCookie,
+  generateSignedCookie,
+  getCookie,
+  getSignedCookie,
+  setCookie,
+  setSignedCookie,
+} from 'hono/cookie';
 import { logger } from 'hono/logger';
 import { poweredBy } from 'hono/powered-by';
 import { prettyJSON } from 'hono/pretty-json';
@@ -15,6 +24,7 @@ import { existsSync, readFile, readFileSync } from "node:fs";
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
 import * as Path from 'node:path';
+import { stringify } from "node:querystring";
 import { renderToStringAsync } from "preact-render-to-string";
 import { Header } from "./Header";
 import { Home } from "./Home";
@@ -95,21 +105,37 @@ export type Session = {
   url: string;
   timestamp: JsonDate;
 };
+export type SessionHead = {
+  sessionId: Opaque<`session`>;
+  userId: Opaque<`user`> | null;
+  name: string;
+};
 
 server.post(`/`, async c => {
   const { url } = await c.req.parseBody<{ url: string }>();
   let [subdomainOrPublicHost, publicHost] = new URL(c.req.url).host.split(`__.`);
   publicHost ??= subdomainOrPublicHost!;
   // publicHost ??= new URL(url).hostname; //`${env.publicHost}:${env.publicPort}`;
-  const sessionId = zid(`SN`).toLowerCase();
+  const sessionId = zid(`SN`).toLowerCase() as Opaque<`session`>;
   appendJsonL<Session>(sessionPath(sessionId), {
     url,
     timestamp: jsonDate(),
   });
+  const userId = getCookie(c, `z.web-syncr.userId`) as Opaque<`user`>;
+  if (userId)
+    appendJsonL<SessionHead>(`./db/sessions.jsonl`, {
+      sessionId,
+      userId,
+      name: url.replaceAll(/(www.)|(https?:\/\/)/g, ``) });
   return c.redirect(realUrlToWrapped(url, sessionId, publicHost));
 });
+server.post(`/login`, async c => {
+  const { username, password } = await c.req.parseBody<{ username: string; password: string }>();
+  setCookie(c, `z.web-syncr.userId`, username, { sameSite: `none`, secure: true });
+  return c.redirect(`/`);
+});
 
-console.log(`Version: 9`);
+console.log(`Version: 4.0`);
 
 server.all(`*`, async (c) => {
   const { req } = c;
@@ -126,7 +152,16 @@ server.all(`*`, async (c) => {
     //   <button type="submit">Go</button>
     // </form>
     //     `);
-    return c.html(await renderToStringAsync(Home({ currentUrl: _url.toString() })));
+
+    const userId = getCookie(c, `z.web-syncr.userId`);
+    const sessions = userId? readJsonL<SessionHead>(`./db/sessions.jsonl`)?.filter((h) => h.userId === userId) : undefined;
+    return c.html(`<html><head>
+        <script>${readFileSync(`./src/injected.js`, `utf8`)}</script>
+      </head>
+      <body>
+        ${await renderToStringAsync(Home({ currentUrl: _url.toString(), sessions }))}
+      </body>
+    </html>`);
   }
   const [subdomain, publicHost] = _url.host.split(`__.`);
   if (!publicHost)
@@ -267,7 +302,7 @@ server.all(`*`, async (c) => {
     // console.info(`${realUrl}: replaced  v\n`+diffText(originalBody.wrap(), replaceAllPatterns(originalBody.wrap(), replacements)!)+`\n${realUrl}: replaced ^`);
 
     newBody = newBody.replace(/(<\s*body[^>]*>)/i, `$1`+await renderToStringAsync(Header({ session: { ...session, sessionId }, history: sessions })));
-    newBody = newBody.replace(/(<\/\s*head)/i, (m, a, b) => `<script>${readFileSync(`./src/injected.js`, `utf8`)}</script>${a}`);
+    newBody = newBody.replace(/(<\/\s*head)/i, (m, a, b) => `<script>${readFileSync(`./src/injected.js`, `utf8`)}</>${a}`);
     return new Response(newBody, response);
   }
   else

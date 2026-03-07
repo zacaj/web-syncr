@@ -9,6 +9,10 @@ function wrapAndNavigate(realUrl, sessionId) {
   location.assign(realUrlToWrapped(realUrl, sessionId, new URL(location.href).host.split(`__.`)[1]));
 };
 
+function navigateToSessionId(sessionId, publicHost = new URL(location.href).host.split(`__.`)[1]) {
+  location.assign(`https://${sessionId.toLowerCase()}__.${publicHost}`);
+}
+
 function toggleSessions() {
   const e = document.getElementById(`sessions`);
   e.style.display = e.style.display != `none` ? `none` : `block`;

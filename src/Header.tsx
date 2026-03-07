@@ -47,7 +47,9 @@ export function Header({ session, history }: {
       {new URL(session.url).pathname}
     </button>
     <div id="sessions" style={{ position: `absolute`, zIndex: 1000, left: 0, right: 0, bottom: 0, top: `100%`, display: `none` }}>
-      {history.map(s => <button type="button" onClick={`wrapAndNavigate('${s.url}', '${session.sessionId}')` as Hack}>{s.url.replaceAll(/(www\.|https?|:\/\/)/g, ``)} - {s.timestamp}</button>)}
+      <div style={{ display: `flex`, flexDirection: `column`, gap: `1rem` }}>
+        {history.map(s => <button type="button" onClick={`wrapAndNavigate('${s.url}', '${session.sessionId}')` as Hack}>{s.url.replaceAll(/(www\.|https?|:\/\/)/g, ``)} - {s.timestamp}</button>)}
+      </div>
     </div>
 
     {` `}
