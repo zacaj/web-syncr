@@ -302,7 +302,7 @@ server.all(`*`, async (c) => {
     // console.info(`${realUrl}: replaced  v\n`+diffText(originalBody.wrap(), replaceAllPatterns(originalBody.wrap(), replacements)!)+`\n${realUrl}: replaced ^`);
 
     newBody = newBody.replace(/(<\s*body[^>]*>)/i, `$1`+await renderToStringAsync(Header({ session: { ...session, sessionId }, history: sessions })));
-    newBody = newBody.replace(/(<\/\s*head)/i, (m, a, b) => `<script>${readFileSync(`./src/injected.js`, `utf8`)}</>${a}`);
+    newBody = newBody.replace(/(<\/\s*head)/i, (m, a, b) => `<script>${readFileSync(`./src/injected.js`, `utf8`)}</script>${a}`);
     return new Response(newBody, response);
   }
   else
