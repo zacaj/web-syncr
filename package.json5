@@ -6,7 +6,7 @@
   author: "zacaj",
   main: "index.js",
   scripts: {
-    start: "tsx src/server",
+    start: "tsx --env-file=.env src/server",
     build: "tsc --noEmitOnError --noEmit false",
     "docker:build": "docker build -t web-syncr --target dev --progress=plain .", //  --progress=plain --output type=docker,compression=uncompressed 
     "docker:build:prod": "docker build -t web-syncr --progress=plain --target prod .",

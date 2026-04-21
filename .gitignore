@@ -32,5 +32,6 @@ common
 *.tsbuildinfo
 .vinxi
 tmp*
+.kilo/plans
 
 # per project:

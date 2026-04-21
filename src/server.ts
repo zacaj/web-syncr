@@ -135,8 +135,61 @@ server.post(`/login`, async c => {
   return c.redirect(`/`);
 });
 
-console.log(`Version: 4.0`);
+server.post(`/__client-nav`, async (c) => {
+  const { sessionId, url: wrappedUrl, html: clientHtml } = await c.req.json<{
+    sessionId: string;
+    url: string;
+    html?: string;
+  }>();
 
+  const sessionPath = `./db/session_${sessionId}.jsonl`;
+  if (!existsSync(sessionPath)) {
+    c.status(404);
+    return c.json({ error: `Session not found` });
+  }
+
+  const realUrl = wrappedUrlToReal(wrappedUrl);
+
+  const session = appendJsonL<Session>(sessionPath, {
+    url: realUrl,
+    timestamp: jsonDate(),
+  });
+
+  const safePath = new URL(realUrl).pathname;
+  let path = Path.join(`./db/session_${sessionId}`, safePath);
+  if (path.endsWith(`/`)) path += `index.html`;
+  else if (!Path.extname(path)) path += `.html`;
+
+  try {
+    const response = await fetch(realUrl);
+    const html = await response.text();
+
+    if (!existsSync(path)) {
+      await mkdir(Path.dirname(path), { recursive: true });
+      await writeFile(path, html);
+    }
+  } catch (err) {
+    console.error(`Error fetching client-nav HTML for ${realUrl}:`, err);
+  }
+
+  if (clientHtml) {
+    try {
+      path+=`.cli.html`;
+      if (!existsSync(path)) {
+        await mkdir(Path.dirname(path), { recursive: true });
+        await writeFile(path, clientHtml);
+      }
+    } catch (err) {
+      console.error(`Error saving client-nav HTML for ${realUrl}:`, err);
+    }
+  }
+
+  c.status(200);
+  return c.json({ ok: true, session });
+});
+
+console.log(`Version: 5.1`);
+let cacheCookies: any = undefined;
 server.all(`*`, async (c) => {
   const { req } = c;
   // const url = req.path.match(/(https?:\/\/.*$)/)?.[1];
@@ -360,3 +413,13 @@ export function realUrlToWrapped(realUrl: string, sessionId: string, publicHost:
   return newURL;
 }
 
+
+function wrappedUrlToReal(wrappedUrl: string) {
+  const url = new URL(wrappedUrl);
+  const [subdomain, publicHost] = url.host.split(`__.`);
+  if (!publicHost) return wrappedUrl;
+  const [sessionId, baseUrl] = subdomain!.split(`__`, 2);
+  if (!baseUrl) return wrappedUrl;
+  const realBaseUrl = baseUrl.replace(/_/g, `.`);
+  return `https://${realBaseUrl}${url.pathname}${url.search}${url.hash}`;
+}
