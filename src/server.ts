@@ -178,7 +178,7 @@ server.all(`*`, async (c) => {
   let sessions: Session[];
   let realUrl: string;
   if (sessionId) {
-    sessions = lastJsonLs<Session>(sessionPath(sessionId), 10, []);
+    sessions = lastJsonLs<Session>(sessionPath(sessionId), 20, []);
     const _session = sessions[0];
     if (_session)
       _session.url = new URL(_session.url).toString();
@@ -234,10 +234,14 @@ server.all(`*`, async (c) => {
         }
       }
       else
-        session = _session?.url !== newUrl.toString() ? {
+        // session = _session?.url !== newUrl.toString() ? {
+        //   url: newUrl.toString(),
+        //   timestamp: jsonDate(),
+        // } : _session;
+        session = _session ?? {
           url: newUrl.toString(),
           timestamp: jsonDate(),
-        } : _session;
+        };
     }
   }
   else {
@@ -283,6 +287,8 @@ server.all(`*`, async (c) => {
     let path = Path.join(`./db/session_${sessionId}`, new URL(realUrl).pathname);
     if (path.endsWith(`/`))
       path += `index.html`;
+    else if (!Path.extname(path))
+      path += `.html`;
     if (!existsSync(path)) {
       console.info(`Save ${realUrl} to ${path}`);
       await mkdir(Path.dirname(path), { recursive: true });

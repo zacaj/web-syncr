@@ -36,7 +36,7 @@
       "type": "bind"
     }
   ],
-  "runArgs": ["-p", "29443:443"],
+  "runArgs": ["-p", "29443:443","--add-host=host.docker.internal:host-gateway"],
 	// "forwardPorts": [
   //   29443
   // ],

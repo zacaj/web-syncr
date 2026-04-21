@@ -12,7 +12,7 @@ export function Header({ session, history }: {
   history: Session[];
 }) {
   // const [s, setS] = useState(1);
-  return <div style={{ top: 0, right: 0, left: 0, background: `lightyellow`, zIndex: 10000, padding: `0.25rem`, position: `relative`, display: `flex`, flexDirection: `row`, gap: `1rem` }}>
+  return <div style={{ top: 0, right: 0, left: 0, background: `lightyellow`, color: `black`, zIndex: 10000, padding: `0.25rem`, position: `relative`, display: `flex`, flexDirection: `row`, gap: `1rem` }}>
     <span>Session: {session.sessionId}</span>
 
     {!!history[0] && session.timestamp < history[0].timestamp &&
@@ -46,7 +46,7 @@ export function Header({ session, history }: {
     <button type="button" onClick={`toggleSessions()` as Hack}>
       {new URL(session.url).pathname}
     </button>
-    <div id="sessions" style={{ position: `absolute`, zIndex: 1000, left: 0, right: 0, bottom: 0, top: `100%`, display: `none` }}>
+    <div id="sessions" style={{ position: `absolute`, zIndex: 1000, left: 0, right: 0, bottom: 0, top: `100%`, display: `none`, background: `white` }}>
       <div style={{ display: `flex`, flexDirection: `column`, gap: `1rem` }}>
         {history.map(s => <button type="button" onClick={`wrapAndNavigate('${s.url}', '${session.sessionId}')` as Hack}>{s.url.replaceAll(/(www\.|https?|:\/\/)/g, ``)} - {s.timestamp}</button>)}
       </div>

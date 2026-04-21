@@ -22,6 +22,7 @@
     "docker:start_push": "pnpm docker:build_push && pnpm docker:compose",
     "docker:set-tag": "ssh -C zacaj@git.zacaj.com -p 1022 \"sed -E \\\"s/(\\/web-syncr:).*/\\1$DTV/\\\" -i.bak /home/zacaj/web-syncr/docker-compose.yml\"",
     "docker:compose": "ssh -C zacaj@git.zacaj.com -p 1022 'cd /home/zacaj/web-syncr && docker compose up -d --force-recreate --pull always'", //  --pull always
+    "docker:deploy": "pnpm docker:build && pnpm docker:tag:push_registry && pnpm docker:set-tag && pnpm docker:compose",
   },
   type: "module",
   dependencies: {
