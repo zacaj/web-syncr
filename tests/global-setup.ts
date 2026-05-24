@@ -71,6 +71,12 @@ export default async function globalSetup() {
   const mockServer = http.createServer((req, res) => {
     const pathname = new URL(req.url!, `http://localhost`).pathname;
 
+    if (pathname === `/redirect-to-page2`) {
+      res.writeHead(301, { 'Location': `http://localhost/page2` });
+      res.end();
+      return;
+    }
+
     if (pathname.startsWith(FIXTURE_PREFIX)) {
       const rel = pathname.slice(FIXTURE_PREFIX.length);
       const fsPath = join(process.cwd(), `tests/fixtures`, `${rel}.local.html`);

@@ -103,6 +103,13 @@ test(`absolute hrefs in proxied HTML are rewritten to wrapped form`, async ({ pa
   expect(href).not.toBe(`http://localhost/page2`);
 });
 
+test(`3xx redirects are rewritten to the wrapped subdomain`, async ({ page }) => {
+  await createSession(page, `/redirect-to-page2`);
+  expect(page.url()).toMatch(WRAPPED_URL_RE);
+  expect(page.url()).toContain(`/page2`);
+  await expect(page.locator(`h1`)).toContainText(MOCK_PAGES[`/page2`]!.title);
+});
+
 test(`/__client-nav stores the real (unwrapped) URL in the JSONL`, async ({ page }) => {
   await createSession(page);
   const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1]!;

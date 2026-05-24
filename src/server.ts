@@ -267,15 +267,27 @@ server.all(`*`, async (c) => {
   }
 
   const response = await proxy(realUrl, {
-    ...req.raw, // eslint-disable-line @typescript-eslint/no-misused-spread
     method: req.method,
     headers: forwardHeaders(req),
     body: req.raw.body,
     signal: req.raw.signal,
+    redirect: `manual`,
   }).catch(err => {
     console.error(`Proxy Error: ${req.method} ${realUrl}: `, err);
     throw err;
   });
+
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get(`location`);
+    if (location) {
+      const absLocation = new URL(location, realUrl).toString();
+      const wrappedLocation = realUrlToWrapped(absLocation, sessionId, publicHost);
+      const newHeaders = new Headers(response.headers);
+      newHeaders.set(`location`, wrappedLocation.toString());
+      return new Response(null, { status: response.status, statusText: response.statusText, headers: newHeaders });
+    }
+  }
+
   const originalResponse = response.clone();
 
   // const buffer = await response.text();
