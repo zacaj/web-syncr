@@ -23,9 +23,9 @@ import tsConfig from "./common/eslint/typescript.config.js";
 // /** @type { import("eslint").Linter.Config[] } */
 export default defineConfig(
   {
-    ignores: [`**/.template*/`],
+    ignores: [`**/.template*/`, `db/`, `build/`, `.*/`, `playwright-report/`, `test-results/`],
   },
   baseConfig,
   tsConfig,
   formatConfig,
-)
+);

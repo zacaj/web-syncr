@@ -8,6 +8,10 @@
   scripts: {
     start: "tsx --env-file=.env src/server",
     typecheck: "tsc --noEmitOnError --noEmit false",
+    test: "playwright test",
+    lint: "eslint .",
+    "lint:fix": "eslint --fix .",
+
     "docker:build": "docker build -t web-syncr --target dev --progress=plain .", //  --progress=plain --output type=docker,compression=uncompressed 
     "docker:build:prod": "docker build -t web-syncr --progress=plain --target prod .",
     "docker:run": "docker run -p 443:443 web-syncr",
@@ -25,6 +29,7 @@
     "docker:deploy": "pnpm docker:build && pnpm docker:tag:push_registry && pnpm docker:set-tag && pnpm docker:compose",
   },
   type: "module",
+  // try to keep dependencies separated by category
   dependencies: {
     "@hono/node-server": "^1.19",
     hono: "^4",
@@ -46,6 +51,9 @@
     "better-typescript-lib": "^2.12.0",
     tsx: "^4",
     typescript: "^5.9",
+
+    "@playwright/test": "^1.60.0",
+    "undici-types": "^8.3.0",
   },
   engines: {
     node: ">=24",

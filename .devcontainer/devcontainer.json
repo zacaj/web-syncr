@@ -16,6 +16,10 @@
       "version": "latest"
     },
     "ghcr.io/devcontainers-extra/features/mkcert:1": {},
+    "ghcr.io/schlich/devcontainer-features/playwright": {
+      "installBrowsers": true,
+			"browsers": "chromium",
+    },
   },
   "postCreateCommand": {
     "deps": "pnpm i",

@@ -43,7 +43,7 @@ const server = new Hono({
 // }
 });
 
-const ignoreProxy: H<BlankEnv, any, BlankInput, any> = async (c) => {
+const ignoreProxy: H<BlankEnv> = async (c) => {
   try {
     const { req } = c;
     const _url = new URL(req.url);
@@ -61,8 +61,8 @@ const ignoreProxy: H<BlankEnv, any, BlankInput, any> = async (c) => {
     }
     baseUrl = baseUrl?.replaceAll(/([^_])_([^_])/g, `$1.$2`);
     const newUrl = new URL(req.url);
-    newUrl.host = baseUrl+`:443`;
-    newUrl.protocol = `https:`;
+    newUrl.host = `${baseUrl}:${env.proxyPort}`;
+    newUrl.protocol = `${env.proxyProtocol}:`;
     const realUrl = newUrl.toString();
 
     const response = await proxy(realUrl, {
@@ -97,6 +97,9 @@ const env = {
   publicHost: `localhost`,
   httpsKey: undefined as string|undefined,
   httpsCert: undefined as string|undefined,
+  proxyPort: 443,
+  proxyProtocol: `https`,
+  dbPath: `./db`,
   ...process.env,
 };
 
@@ -123,7 +126,7 @@ server.post(`/`, async c => {
   });
   const userId = getCookie(c, `z.web-syncr.userId`) as Opaque<`user`>;
   if (userId)
-    appendJsonL<SessionHead>(`./db/sessions.jsonl`, {
+    appendJsonL<SessionHead>(`${env.dbPath}/sessions.jsonl`, {
       sessionId,
       userId,
       name: url.replaceAll(/(www.)|(https?:\/\/)/g, ``) });
@@ -151,15 +154,13 @@ server.post(`/__client-nav`, async (c) => {
 
   const sessions = lastJsonLs<Session>(sessionPath(sessionId), 20, []);
   const prevSession = sessions.find(s => new URL(s.url).toString() === realUrl);
-  if (!prevSession) {
-    const session = appendJsonL<Session>(sessionPath(sessionId), {
-      url: realUrl,
-      timestamp: jsonDate(),
-    });
-  }
+  const session = prevSession ?? appendJsonL<Session>(sessionPath(sessionId), {
+    url: realUrl,
+    timestamp: jsonDate(),
+  });
 
   const safePath = new URL(realUrl).pathname;
-  let path = Path.join(`./db/session_${sessionId}`, safePath);
+  let path = Path.join(`${env.dbPath}/session_${sessionId}`, safePath);
   if (path.endsWith(`/`)) path += `index.html`;
   else if (!Path.extname(path)) path += `.html`;
 
@@ -192,7 +193,7 @@ server.post(`/__client-nav`, async (c) => {
 });
 
 console.log(`Version: 5.1`);
-let cacheCookies: any = undefined;
+const cacheCookies: any = undefined;
 server.all(`*`, async (c) => {
   const { req } = c;
   // const url = req.path.match(/(https?:\/\/.*$)/)?.[1];
@@ -210,7 +211,7 @@ server.all(`*`, async (c) => {
     //     `);
 
     const userId = getCookie(c, `z.web-syncr.userId`);
-    const sessions = userId? readJsonL<SessionHead>(`./db/sessions.jsonl`)?.filter((h) => h.userId === userId) : undefined;
+    const sessions = userId? readJsonL<SessionHead>(`${env.dbPath}/sessions.jsonl`)?.filter((h) => h.userId === userId) : undefined;
     return c.html(`<html><head>
         <script>${readFileSync(`./src/injected.js`, `utf8`)}</script>
       </head>
@@ -244,17 +245,22 @@ server.all(`*`, async (c) => {
       if (!_session)
         return c.text(`Invalid session "`+sessionId+`"`);
 
-      // session = _session;
-      // realUrl = session.url;
-      // baseUrl = new URL(realUrl).host;
-      // const newURL = new URL(realUrl);
-      // newURL.host = `${sessionId}_${baseUrl}.${env.publicHost}:${env.publicPort}`;
-      return c.redirect(realUrlToWrapped(_session.url, sessionId, publicHost));
+      const redirectTarget = realUrlToWrapped(_session.url, sessionId, publicHost);
+      if (redirectTarget.toString() !== req.url)
+        return c.redirect(redirectTarget);
+
+      // Already at the wrapped session URL — proxy it directly
+      const sessionUrl = new URL(_session.url);
+      sessionUrl.protocol = `${env.proxyProtocol}:`;
+      sessionUrl.host = `${sessionUrl.hostname}:${env.proxyPort}`;
+      realUrl = sessionUrl.toString();
+      baseUrl ??= sessionUrl.hostname;
+      session = _session;
     }
     else {
       const newUrl = new URL(req.url);
-      newUrl.host = baseUrl+`:443`;
-      newUrl.protocol = `https:`;
+      newUrl.host = `${baseUrl}:${env.proxyPort}`;
+      newUrl.protocol = `${env.proxyProtocol}:`;
       realUrl = newUrl.toString();
       const prevSession = sessions.find(s => new URL(s.url).toString() === realUrl && s.timestamp !== _session?.timestamp);
       const isPage = req.header(`Sec-Fetch-Mode`) === `navigate` && newUrl.pathname.length > 1;
@@ -304,8 +310,8 @@ server.all(`*`, async (c) => {
     sessions = [];
     if (baseUrl) {
       const newUrl = new URL(req.url);
-      newUrl.host = baseUrl+`:443`;
-      newUrl.protocol = `https:`;
+      newUrl.host = `${baseUrl}:${env.proxyPort}`;
+      newUrl.protocol = `${env.proxyProtocol}:`;
       realUrl = newUrl.toString();
       session = {
         url: realUrl.toString(),
@@ -340,7 +346,7 @@ server.all(`*`, async (c) => {
   const originalBody = body;
 
   try {
-    let path = Path.join(`./db/session_${sessionId}`, new URL(realUrl).pathname);
+    let path = Path.join(`${env.dbPath}/session_${sessionId}`, new URL(realUrl).pathname);
     if (path.endsWith(`/`))
       path += `index.html`;
     else if (!Path.extname(path))
@@ -359,7 +365,8 @@ server.all(`*`, async (c) => {
   replacements[encodeURIComponent(baseUrl)] ??= encodeURIComponent(`${subdomain}__.${publicHost}`);
   replacements[encodeURI(baseUrl)] ??= encodeURI(`${subdomain}__.${publicHost}`);
 
-  let newBody = replaceAllPatterns(body, replacements);
+  const isHtml = (response.headers.get(`content-type`) ?? ``).includes(`text/html`);
+  let newBody = replaceAllPatterns(body, replacements) ?? (isHtml ? body : null);
   if (newBody) {
     // console.info(`${realUrl}: replaced  v\n`+diffText(originalBody.wrap(), replaceAllPatterns(originalBody.wrap(), replacements)!)+`\n${realUrl}: replaced ^`);
 
@@ -406,12 +413,13 @@ serve({
 
 
 function sessionPath(sessionId: string) {
-  return `./db/session_${sessionId}.jsonl`;
+  return `${env.dbPath}/session_${sessionId}.jsonl`;
 }
 
 export function realUrlToWrapped(realUrl: string, sessionId: string, publicHost: string) {
   const newURL = new URL(realUrl);
   const baseUrl = new URL(realUrl).host;
+  newURL.protocol = `https:`;
   newURL.host = `${sessionId.toLowerCase()}__${baseUrl.replaceAll(/([^.])\.([^.])/g, `$1_$2`)}__.${publicHost}`;
   return newURL;
 }
