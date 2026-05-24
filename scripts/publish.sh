@@ -62,9 +62,10 @@ git commit -m "chore: release v$NEW_VERSION"
 git tag "v$NEW_VERSION"
 git tag -f "v$MAJOR.$MINOR"
 git tag -f "v$MAJOR"
+REMOTE=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' | cut -d/ -f1)
 git push
-git push origin "v$NEW_VERSION"
-git push --force origin "v$MAJOR.$MINOR" "v$MAJOR"
+git push "$REMOTE" "v$NEW_VERSION"
+git push --force "$REMOTE" "v$MAJOR.$MINOR" "v$MAJOR"
 
 
 echo ""

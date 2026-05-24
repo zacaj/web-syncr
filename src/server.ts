@@ -26,6 +26,12 @@ function sessionPath(sessionId: string) {
 
 const server = new Hono();
 
+function forwardHeaders(req: { raw: Request }) {
+  const headers = new Headers(req.raw.headers);
+  headers.delete(`host`);
+  return headers;
+}
+
 const ignoreProxy: H<BlankEnv> = async (c) => {
   try {
     const { req } = c;
@@ -41,6 +47,10 @@ const ignoreProxy: H<BlankEnv> = async (c) => {
 
     return await proxy(realUrl, {
       ...req.raw, // eslint-disable-line @typescript-eslint/no-misused-spread
+      method: req.method,
+      headers: forwardHeaders(req),
+      body: req.raw.body,
+      signal: req.raw.signal,
     }).catch(err => {
       console.error(`Proxy Error: ${req.method} ${realUrl}: `, err);
       throw err;
@@ -258,6 +268,10 @@ server.all(`*`, async (c) => {
 
   const response = await proxy(realUrl, {
     ...req.raw, // eslint-disable-line @typescript-eslint/no-misused-spread
+    method: req.method,
+    headers: forwardHeaders(req),
+    body: req.raw.body,
+    signal: req.raw.signal,
   }).catch(err => {
     console.error(`Proxy Error: ${req.method} ${realUrl}: `, err);
     throw err;

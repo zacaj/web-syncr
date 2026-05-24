@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
+import { join } from 'node:path';
 
 export const PID_FILE = `/tmp/web-syncr-test-server.pid`;
 export const DB_TEST_PATH = `/tmp/web-syncr-test-db`;
@@ -66,8 +67,23 @@ export default async function globalSetup() {
   mkdirSync(DB_TEST_PATH, { recursive: true });
 
   // Start mock HTTP server that serves controlled test fixtures
+  const FIXTURE_PREFIX = `/fixtures/`;
   const mockServer = http.createServer((req, res) => {
     const pathname = new URL(req.url!, `http://localhost`).pathname;
+
+    if (pathname.startsWith(FIXTURE_PREFIX)) {
+      const rel = pathname.slice(FIXTURE_PREFIX.length);
+      const fsPath = join(process.cwd(), `tests/fixtures`, `${rel}.local.html`);
+      try {
+        const html = readFileSync(fsPath, `utf8`);
+        res.writeHead(200, { 'Content-Type': `text/html` });
+        res.end(html);
+        return;
+      } catch {
+        // fall through to 404
+      }
+    }
+
     const page = MOCK_PAGES[pathname];
     if (page) {
       res.writeHead(200, { 'Content-Type': `text/html` });

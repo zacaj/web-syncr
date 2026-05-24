@@ -12,10 +12,9 @@
       ],
     },
     "composite": false,
-    // "types": [
-    //   "preact",
-    //   "node",
-    // ],
+    "types": [
+      "node",
+    ],
     "jsx": "react",
     "jsxFactory": "h",
     "typeRoots": [
