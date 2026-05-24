@@ -92,7 +92,7 @@ export default async function globalSetup() {
     cwd: process.cwd(),
   });
 
-  proc.stderr?.on(`data`, (d: Buffer) => process.stderr.write(d));
+  proc.stderr.on(`data`, (d: Buffer) => process.stderr.write(d));
   proc.on(`error`, err => { throw err });
   writeFileSync(PID_FILE, String(proc.pid));
 

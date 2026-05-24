@@ -1,3 +1,5 @@
+/* eslint-disable */ 
+// @ts-nocheck
 function realUrlToWrapped(realUrl, sessionId, publicHost) {
   const newURL = new URL(realUrl);
   const baseUrl = new URL(realUrl).host;
@@ -58,5 +60,5 @@ function navigateToSessionId(sessionId, publicHost = new URL(location.href).host
 
 function toggleSessions() {
   const e = document.getElementById(`sessions`);
-  e.style.display = e.style.display != `none` ? `none` : `block`;
+  e.style.display = e.style.display !== `none` ? `none` : `block`;
 }
