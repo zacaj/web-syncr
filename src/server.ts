@@ -142,18 +142,21 @@ server.post(`/__client-nav`, async (c) => {
     html?: string;
   }>();
 
-  const sessionPath = `./db/session_${sessionId}.jsonl`;
-  if (!existsSync(sessionPath)) {
+  if (!existsSync(sessionPath(sessionId))) {
     c.status(404);
     return c.json({ error: `Session not found` });
   }
 
   const realUrl = wrappedUrlToReal(wrappedUrl);
 
-  const session = appendJsonL<Session>(sessionPath, {
-    url: realUrl,
-    timestamp: jsonDate(),
-  });
+  const sessions = lastJsonLs<Session>(sessionPath(sessionId), 20, []);
+  const prevSession = sessions.find(s => new URL(s.url).toString() === realUrl);
+  if (!prevSession) {
+    const session = appendJsonL<Session>(sessionPath(sessionId), {
+      url: realUrl,
+      timestamp: jsonDate(),
+    });
+  }
 
   const safePath = new URL(realUrl).pathname;
   let path = Path.join(`./db/session_${sessionId}`, safePath);
