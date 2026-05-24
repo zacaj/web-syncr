@@ -23,6 +23,13 @@ export const MOCK_PAGES: Record<string, { title: string; html: string }> = {
       <a href="/">Back home</a>
     </body></html>`,
   },
+  '/with-link': {
+    title: `With Absolute Link`,
+    html: `<html><head><title>With Absolute Link</title></head><body>
+      <h1>With Absolute Link</h1>
+      <a id="abs" href="http://localhost/page2">absolute link</a>
+    </body></html>`,
+  },
 };
 
 function readDotEnv(path: string): Record<string, string> {

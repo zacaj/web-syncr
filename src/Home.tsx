@@ -1,6 +1,6 @@
 import type { JsonDate } from '@common/util';
 import { h } from 'preact';
-import type { SessionHead } from './server';
+import type { SessionHead } from './config';
 
 export function Home({ currentUrl, sessions }: { currentUrl: string; sessions?: SessionHead[] }) {
   return <div>

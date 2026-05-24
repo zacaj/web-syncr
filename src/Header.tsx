@@ -1,7 +1,8 @@
 import type { Opaque } from '@common/util';
 import { h, type TargetedEvent } from 'preact';
 import { useState } from "preact/hooks";
-import { realUrlToWrapped, type Session } from './server';
+import type { Session } from './config';
+import { realUrlToWrapped } from './urls';
 
 (globalThis as Hack).wrapAndNavigate = (realUrl: string, sessionId: string) => {
   location.assign(realUrlToWrapped(realUrl, sessionId, new URL(location.href).host.split(`__.`)[1]!));

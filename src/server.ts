@@ -1,11 +1,8 @@
 import { serve } from "@hono/node-server";
 import { appendJsonL, lastJsonLs, readJsonL } from "common/util/files";
-import { jsonDate, zid, type JsonDate, type Opaque } from "common/util/index";
+import { jsonDate, zid, type Opaque } from "common/util/index";
 import { Hono } from 'hono';
-import {
-  getCookie,
-  setCookie,
-} from 'hono/cookie';
+import { getCookie, setCookie } from 'hono/cookie';
 import { logger } from 'hono/logger';
 import { poweredBy } from 'hono/powered-by';
 import { proxy } from 'hono/proxy';
@@ -15,52 +12,39 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
 import * as Path from 'node:path';
 import { renderToStringAsync } from "preact-render-to-string";
-import { Header } from "./Header";
+import { env, type Session, type SessionHead } from "./config";
 import { Home } from "./Home";
+import { injectHeaderAndScript, replaceAllPatterns } from "./rewrite";
+import { parseSubdomain, realUrlToWrapped, wrappedUrlToReal } from "./urls";
 
+export { realUrlToWrapped };
+export type { Session, SessionHead };
 
-// const routes: {[method: string]: Map<RegExp, any>} = {};
-const server = new Hono({
-//    router: {
-//   add(method, path, handler) {
-//     const regex = new RegExp(path);
-//     (routes[method]??=new Map()).set(regex, handler);
-//   },
-//   match(method, path) {
-//     if (!routes[method]) return
-//   },
-// }
-});
+function sessionPath(sessionId: string) {
+  return `${env.dbPath}/session_${sessionId}.jsonl`;
+}
+
+const server = new Hono();
 
 const ignoreProxy: H<BlankEnv> = async (c) => {
   try {
     const { req } = c;
     const _url = new URL(req.url);
+    const parsed = parseSubdomain(_url.host);
+    if (!parsed?.baseUrl)
+      return c.text(`No subdomain found on ` + _url);
 
-    const [subdomain, publicHost] = _url.host.split(`__.`);
-    if (!publicHost)
-      return c.text(`No subdomain found on `+_url);
-
-    let [sessionIdOrBaseUrl, baseUrl] = subdomain!.split(`__`, 2);
-    let sessionId = sessionIdOrBaseUrl;
-
-    if (!baseUrl && sessionIdOrBaseUrl?.includes(`.`)) {
-      sessionId = undefined;
-      baseUrl = sessionIdOrBaseUrl;
-    }
-    baseUrl = baseUrl?.replaceAll(/([^_])_([^_])/g, `$1.$2`);
     const newUrl = new URL(req.url);
-    newUrl.host = `${baseUrl}:${env.proxyPort}`;
+    newUrl.host = `${parsed.baseUrl}:${env.proxyPort}`;
     newUrl.protocol = `${env.proxyProtocol}:`;
     const realUrl = newUrl.toString();
 
-    const response = await proxy(realUrl, {
+    return await proxy(realUrl, {
       ...req.raw, // eslint-disable-line @typescript-eslint/no-misused-spread
     }).catch(err => {
       console.error(`Proxy Error: ${req.method} ${realUrl}: `, err);
       throw err;
     });
-    return response;
   }
   catch (_err) {
     c.status(500);
@@ -80,47 +64,22 @@ server.onError((err, c) => {
   return c.text(`Error loading URL, traceId: ${traceId}\n${err}`, 500);
 });
 
-const env = {
-  localPort: 443,
-  publicPort: 29443,
-  publicHost: `localhost`,
-  httpsKey: undefined as string|undefined,
-  httpsCert: undefined as string|undefined,
-  proxyPort: 443,
-  proxyProtocol: `https`,
-  dbPath: `./db`,
-  ...process.env,
-};
-
-export type Session = {
-  // id: Opaque<'session'>;
-  url: string;
-  timestamp: JsonDate;
-};
-export type SessionHead = {
-  sessionId: Opaque<`session`>;
-  userId: Opaque<`user`> | null;
-  name: string;
-};
-
 server.post(`/`, async c => {
   const { url } = await c.req.parseBody<{ url: string }>();
   let [subdomainOrPublicHost, publicHost] = new URL(c.req.url).host.split(`__.`);
   publicHost ??= subdomainOrPublicHost!;
-  // publicHost ??= new URL(url).hostname; //`${env.publicHost}:${env.publicPort}`;
   const sessionId = zid(`SN`).toLowerCase() as Opaque<`session`>;
-  appendJsonL<Session>(sessionPath(sessionId), {
-    url,
-    timestamp: jsonDate(),
-  });
-  const userId = getCookie(c, `z.web-syncr.userId`) as Opaque<`user`>;
+  appendJsonL<Session>(sessionPath(sessionId), { url, timestamp: jsonDate() });
+  const userId = getCookie(c, `z.web-syncr.userId`) as Opaque<`user`> | null;
   if (userId)
     appendJsonL<SessionHead>(`${env.dbPath}/sessions.jsonl`, {
       sessionId,
       userId,
-      name: url.replaceAll(/(www.)|(https?:\/\/)/g, ``) });
+      name: url.replaceAll(/(www.)|(https?:\/\/)/g, ``),
+    });
   return c.redirect(realUrlToWrapped(url, sessionId, publicHost));
 });
+
 server.post(`/login`, async c => {
   const { username, password } = await c.req.parseBody<{ username: string; password: string }>();
   setCookie(c, `z.web-syncr.userId`, username, { sameSite: `none`, secure: true });
@@ -182,25 +141,16 @@ server.post(`/__client-nav`, async (c) => {
 });
 
 console.log(`Version: 5.1`);
-const cacheCookies: any = undefined;
 server.all(`*`, async (c) => {
   const { req } = c;
-  // const url = req.path.match(/(https?:\/\/.*$)/)?.[1];
-  // if (!url)
-  //   return c.text(`Couldn't find URL in '${req.url}'`);
-
   const _url = new URL(req.url);
-  if (!_url.host.includes(`__.`) || _url.host.startsWith(`__.`)) {
-    //     return c.html(`
-    // <p>No base URL or session id found in ${_url}.</p><p>Would you like to start a new session?</p>
-    // <form action="/" method="post">
-    //   <input type="url" name="url" placeholder="URL to sync" style="width: 100%" />
-    //   <button type="submit">Go</button>
-    // </form>
-    //     `);
 
+  const parsed = parseSubdomain(_url.host);
+  if (!parsed) {
     const userId = getCookie(c, `z.web-syncr.userId`);
-    const sessions = userId? readJsonL<SessionHead>(`${env.dbPath}/sessions.jsonl`)?.filter((h) => h.userId === userId) : undefined;
+    const sessions = userId
+      ? (readJsonL<SessionHead>(`${env.dbPath}/sessions.jsonl`) ?? []).filter((h) => h.userId === userId)
+      : undefined;
     return c.html(`<html><head>
         <script>${readFileSync(`./src/injected.js`, `utf8`)}</script>
       </head>
@@ -209,17 +159,8 @@ server.all(`*`, async (c) => {
       </body>
     </html>`);
   }
-  const [subdomain, publicHost] = _url.host.split(`__.`);
-  if (!publicHost)
-    return c.text(`No subdomain found on `+_url);
 
-  let [sessionIdOrBaseUrl, baseUrl] = subdomain!.split(`__`, 2);
-  let sessionId = sessionIdOrBaseUrl;
-  if (!baseUrl && sessionIdOrBaseUrl?.includes(`.`)) {
-    sessionId = undefined;
-    baseUrl = sessionIdOrBaseUrl;
-  }
-  baseUrl = baseUrl?.replaceAll(/([^_])_([^_])/g, `$1.$2`);
+  let { subdomain, sessionId, baseUrl, publicHost } = parsed;
   let session: Session|null;
   let sessions: Session[];
   let realUrl: string;
@@ -302,20 +243,14 @@ server.all(`*`, async (c) => {
       newUrl.host = `${baseUrl}:${env.proxyPort}`;
       newUrl.protocol = `${env.proxyProtocol}:`;
       realUrl = newUrl.toString();
-      session = {
-        url: realUrl.toString(),
-        timestamp: jsonDate(),
-      };
+      session = { url: realUrl, timestamp: jsonDate() };
       sessionId = zid(`SN`);
     }
     else if (req.path.match(/https?:\/\/.*\..*\//)) {
       const newUrl = req.url.split(publicHost)[1]!;
-      const sessionId = zid(`SN`).toLowerCase();
-      appendJsonL<Session>(sessionPath(sessionId), {
-        url: newUrl,
-        timestamp: jsonDate(),
-      });
-      return c.redirect(realUrlToWrapped(newUrl, sessionId, publicHost));
+      const newSessionId = zid(`SN`).toLowerCase();
+      appendJsonL<Session>(sessionPath(newSessionId), { url: newUrl, timestamp: jsonDate() });
+      return c.redirect(realUrlToWrapped(newUrl, newSessionId, publicHost));
     }
     else
       return c.text(`No session or URL found`);
@@ -355,71 +290,24 @@ server.all(`*`, async (c) => {
   replacements[encodeURI(baseUrl)] ??= encodeURI(`${subdomain}__.${publicHost}`);
 
   const isHtml = (response.headers.get(`content-type`) ?? ``).includes(`text/html`);
+  const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
   let newBody = replaceAllPatterns(body, replacements) ?? (isHtml ? body : null);
   if (newBody) {
-    // console.info(`${realUrl}: replaced  v\n`+diffText(originalBody.wrap(), replaceAllPatterns(originalBody.wrap(), replacements)!)+`\n${realUrl}: replaced ^`);
-
-    newBody = newBody.replace(/(<\s*body[^>]*>)/i, `$1`+await renderToStringAsync(Header({ session: { ...session, sessionId }, history: sessions })));
-    newBody = newBody.replace(/(<\/\s*head)/i, (m, a, b) => `<script>${readFileSync(`./src/injected.js`, `utf8`)}</script>${a}`);
+    newBody = await injectHeaderAndScript(newBody, { ...session, sessionId: sessionId }, sessions, injectedJs);
     return new Response(newBody, response);
   }
   else
     return originalResponse;
-
-  function replaceAllPatterns(body: string, replacements: Dict<string>) {
-    let replaced = 0;
-    // for (const [original, replacement] of Object.entries(replacements)) {
-    //   body = body.replaceAll(original, replacement!);
-    // }
-    for (let i = 0; i < body.length && i >= 0;) {
-      const nextMatch = Object.entries(replacements).map(([o, n]) => [o, n!, body.indexOf(o, i)] as const).filter(x => x[2] !== -1);
-      if (!nextMatch.length)
-        break;
-      const x = Math.min(...nextMatch.map(x => x[2]));
-      const debug = body.slice(x, x + 100);
-      const rep = nextMatch.find(m => m[2] === x)!;
-      body = body.slice(0, x)+rep[1]+body.slice(x+rep[0].length);
-      replaced++;
-      i = x + rep[1].length;
-    }
-    if (replaced)
-      return body;
-    return null;
-  }
-},
-);
+});
 
 serve({
   fetch: server.fetch,
   createServer,
   port: env.localPort,
   serverOptions: {
-    key: env.httpsKey? readFileSync(env.httpsKey, `utf8`) : undefined,
-    cert: env.httpsCert? readFileSync(env.httpsCert, `utf8`) : undefined,
-  }}, (info) => {
+    key: env.httpsKey ? readFileSync(env.httpsKey, `utf8`) : undefined,
+    cert: env.httpsCert ? readFileSync(env.httpsCert, `utf8`) : undefined,
+  },
+}, () => {
   console.log(`Server started on https://${env.publicHost}:${env.publicPort} / https://localhost:${env.localPort}`);
 });
-
-
-function sessionPath(sessionId: string) {
-  return `${env.dbPath}/session_${sessionId}.jsonl`;
-}
-
-export function realUrlToWrapped(realUrl: string, sessionId: string, publicHost: string) {
-  const newURL = new URL(realUrl);
-  const baseUrl = new URL(realUrl).host;
-  newURL.protocol = `https:`;
-  newURL.host = `${sessionId.toLowerCase()}__${baseUrl.replaceAll(/([^.])\.([^.])/g, `$1_$2`)}__.${publicHost}`;
-  return newURL;
-}
-
-
-function wrappedUrlToReal(wrappedUrl: string) {
-  const url = new URL(wrappedUrl);
-  const [subdomain, publicHost] = url.host.split(`__.`);
-  if (!publicHost) return wrappedUrl;
-  const [sessionId, baseUrl] = subdomain!.split(`__`, 2);
-  if (!baseUrl) return wrappedUrl;
-  const realBaseUrl = baseUrl.replace(/_/g, `.`);
-  return `https://${realBaseUrl}${url.pathname}${url.search}${url.hash}`;
-}

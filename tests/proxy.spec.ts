@@ -86,3 +86,34 @@ test(`/__client-nav records a navigation entry`, async ({ page }) => {
   expect(resp.status()).toBe(200);
   expect((await resp.json() as { ok: boolean }).ok).toBe(true);
 });
+
+test(`ignoreProxy routes static assets without 500`, async ({ page }) => {
+  await createSession(page);
+  const assetUrl = page.url().replace(/\/[^/]*$/, `/favicon.ico`);
+  // Use page.goto (browser DNS) not page.request (Node.js DNS) — *.localhost subdomains
+  // resolve in browsers but not in Node's getaddrinfo.
+  const resp = await page.goto(assetUrl);
+  expect(resp?.status()).not.toBe(500);
+});
+
+test(`absolute hrefs in proxied HTML are rewritten to wrapped form`, async ({ page }) => {
+  await createSession(page, `/with-link`);
+  const href = await page.locator(`#abs`).getAttribute(`href`);
+  expect(href).toContain(`__localhost__.localhost:${TEST_PORT}`);
+  expect(href).not.toBe(`http://localhost/page2`);
+});
+
+test(`/__client-nav stores the real (unwrapped) URL in the JSONL`, async ({ page }) => {
+  await createSession(page);
+  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1]!;
+  const wrappedPage2 = page.url().replace(/\/[^/]*$/, `/page2`);
+
+  await page.request.post(`https://localhost:${TEST_PORT}/__client-nav`, {
+    data: { sessionId, url: wrappedPage2 },
+  });
+
+  const lines = readFileSync(`${DB_TEST_PATH}/session_${sessionId}.jsonl`, `utf8`).trim().split(`\n`);
+  const last = JSON.parse(lines.at(-1)!) as { url: string };
+  expect(last.url).toContain(`/page2`);
+  expect(last.url).not.toContain(`__`);
+});
