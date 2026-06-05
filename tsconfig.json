@@ -1,7 +1,7 @@
 {
   "extends": "./common/tsconfig.base.json",
   "compilerOptions": {
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "baseUrl": "./",
     "paths": {
       "~/*": [
@@ -22,5 +22,6 @@
       "./node_modules",
     ],
   },
-  "include": ["**/*"],
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["db/**", "playwright-report/**", "test-results/**", "build/**"]
 }

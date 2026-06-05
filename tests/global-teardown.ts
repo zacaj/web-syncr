@@ -1,5 +1,5 @@
 import { readFileSync, rmSync, unlinkSync } from 'node:fs';
-import { DB_TEST_PATH, PID_FILE } from './global-setup.ts';
+import { DB_TEST_PATH, PID_FILE } from './global-setup';
 
 export default async function globalTeardown() {
   const mockServer = (globalThis as Record<string, unknown>).__mockServer as { close(cb: () => void): void } | undefined;

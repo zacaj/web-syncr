@@ -13,7 +13,7 @@ export function Header({ session, history }: {
   history: Session[];
 }) {
   // const [s, setS] = useState(1);
-  return <div style={{ top: 0, right: 0, left: 0, background: `lightyellow`, color: `black`, zIndex: 10000, padding: `0.25rem`, position: `relative`, display: `flex`, flexDirection: `row`, gap: `1rem` }}>
+  return <div style={{ top: 0, right: 0, left: 0, background: `lightyellow`, color: `black`, zIndex: 2147483647, padding: `0.25rem`, position: `fixed`, display: `flex`, flexDirection: `row`, gap: `1rem`, pointerEvents: `all` }}>
     <span>Session: {session.sessionId}</span>
 
     {!!history[0] && session.timestamp < history[0].timestamp &&

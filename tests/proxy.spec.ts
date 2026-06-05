@@ -76,15 +76,24 @@ test(`direct link navigation records a session entry in the JSONL`, async ({ pag
   expect(entries[1]!.url).toContain(`/page2`);
 });
 
-test(`/__client-nav records a navigation entry`, async ({ page }) => {
+test(`SPA pushState navigation triggers a full page load and saves HTML`, async ({ page }) => {
   await createSession(page);
-  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
+  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1]!;
 
-  const resp = await page.request.post(`https://localhost:${TEST_PORT}/__client-nav`, {
-    data: { sessionId, url: `http://localhost/`, html: `<html></html>` },
-  });
-  expect(resp.status()).toBe(200);
-  expect((await resp.json() as { ok: boolean }).ok).toBe(true);
+  // injected.js overrides history.pushState to call location.assign(url),
+  // which triggers a full page load through the main proxy handler.
+  await Promise.all([
+    page.waitForURL(/\/page2/),
+    page.evaluate(() => history.pushState({}, ``, `/page2`)),
+  ]);
+
+  const saved = readFileSync(`${DB_TEST_PATH}/session_${sessionId}/page2.html`, `utf8`);
+  expect(saved).toContain(MOCK_PAGES[`/page2`]!.title);
+
+  const lines = readFileSync(`${DB_TEST_PATH}/session_${sessionId}.jsonl`, `utf8`).trim().split(`\n`);
+  const last = JSON.parse(lines.at(-1)!) as { url: string };
+  expect(last.url).toContain(`/page2`);
+  expect(last.url).not.toContain(`__`);
 });
 
 test(`ignoreProxy routes static assets without 500`, async ({ page }) => {
@@ -110,17 +119,3 @@ test(`3xx redirects are rewritten to the wrapped subdomain`, async ({ page }) =>
   await expect(page.locator(`h1`)).toContainText(MOCK_PAGES[`/page2`]!.title);
 });
 
-test(`/__client-nav stores the real (unwrapped) URL in the JSONL`, async ({ page }) => {
-  await createSession(page);
-  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1]!;
-  const wrappedPage2 = page.url().replace(/\/[^/]*$/, `/page2`);
-
-  await page.request.post(`https://localhost:${TEST_PORT}/__client-nav`, {
-    data: { sessionId, url: wrappedPage2 },
-  });
-
-  const lines = readFileSync(`${DB_TEST_PATH}/session_${sessionId}.jsonl`, `utf8`).trim().split(`\n`);
-  const last = JSON.parse(lines.at(-1)!) as { url: string };
-  expect(last.url).toContain(`/page2`);
-  expect(last.url).not.toContain(`__`);
-});

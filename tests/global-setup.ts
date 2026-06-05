@@ -38,7 +38,7 @@ function readDotEnv(path: string): Record<string, string> {
     return Object.fromEntries(
       readFileSync(path, `utf8`)
         .split(`\n`)
-        .filter(l => l.trim() && !l.startsWith(`#`))
+        .filter(l => !!l.trim() && !l.startsWith(`#`))
         .map(l => l.split(`=`, 2) as [string, string]),
     );
   } catch {

@@ -7,7 +7,7 @@ import { logger } from 'hono/logger';
 import { poweredBy } from 'hono/powered-by';
 import { proxy } from 'hono/proxy';
 import type { BlankEnv, H } from "hono/types";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
 import * as Path from 'node:path';
@@ -122,17 +122,17 @@ server.post(`/__client-nav`, async (c) => {
   if (path.endsWith(`/`)) path += `index.html`;
   else if (!Path.extname(path)) path += `.html`;
 
-  try {
-    const response = await fetch(realUrl);
-    const html = await response.text();
+  // try {
+  //   const response = await fetch(realUrl);
+  //   const html = await response.text();
 
-    if (!existsSync(path)) {
-      await mkdir(Path.dirname(path), { recursive: true });
-      await writeFile(path, html);
-    }
-  } catch (err) {
-    console.error(`Error fetching client-nav HTML for ${realUrl}:`, err);
-  }
+  //   if (!existsSync(path)) {
+  //     await mkdir(Path.dirname(path), { recursive: true });
+  //     await writeFile(path, html);
+  //   }
+  // } catch (err) {
+  //   console.error(`Error fetching client-nav HTML for ${realUrl}:`, err);
+  // }
 
   if (clientHtml) {
     try {
@@ -295,14 +295,15 @@ server.all(`*`, async (c) => {
   const body = await response.text();
   const originalBody = body;
 
+  // backup file to disk
   try {
     let path = Path.join(`${env.dbPath}/session_${sessionId}`, new URL(realUrl).pathname);
     if (path.endsWith(`/`))
       path += `index.html`;
     else if (!Path.extname(path))
       path += `.html`;
-    if (!existsSync(path)) {
-      console.info(`Save ${realUrl} to ${path}`);
+    if (!existsSync(path) || statSync(path).size<1000) {
+      console.info(`Save ${realUrl} to ${path} (${Math.round(body.length/1024)}kB)`);
       await mkdir(Path.dirname(path), { recursive: true });
       await writeFile(path, body);
     }

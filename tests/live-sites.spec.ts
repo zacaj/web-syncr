@@ -9,7 +9,9 @@
  * Run: LIVE_TESTS=1 pnpm test tests/live-sites.spec.ts
  */
 import { expect, test } from '@playwright/test';
-import { TEST_PORT } from './global-setup';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DB_TEST_PATH, TEST_PORT } from './global-setup';
 
 const BRIGHTNOVELS_WRAPPED_RE = new RegExp(
   `^https://[a-z0-9]+__brightnovels_com__\\.localhost:${TEST_PORT}/`,
@@ -69,5 +71,19 @@ test.describe(`Live site regression tests`, () => {
     // Inertia shows failed non-Inertia responses in a <dialog> — must NOT be open
     const modalVisible = await page.locator(`dialog[open]`).count();
     expect(modalVisible).toBe(0);
+
+    // Wait for the async /__client-nav fetch+save to complete
+    await page.waitForTimeout(3000);
+
+    // Find the session dir and verify the chapter 2 HTML was saved non-empty
+    const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1]!;
+    const sessionDir = join(DB_TEST_PATH, `session_${sessionId}`);
+    const candidates = [
+      join(sessionDir, `series`, `sigrid`, `2.html`),
+      join(sessionDir, `series`, `sigrid`, `2`, `index.html`),
+    ];
+    const saved = candidates.map(p => existsSync(p) ? readFileSync(p, `utf8`) : null).find(Boolean);
+    expect(saved, `chapter 2 HTML file should exist and be non-empty`).toBeTruthy();
+    expect(saved!.length).toBeGreaterThan(500);
   });
 });

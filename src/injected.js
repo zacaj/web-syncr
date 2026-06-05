@@ -1,10 +1,10 @@
-/* eslint-disable */ 
+/* eslint-disable */
 // @ts-nocheck
 function realUrlToWrapped(realUrl, sessionId, publicHost) {
-  const newURL = new URL(realUrl);
-  const baseUrl = new URL(realUrl).host;
-  newURL.host = `${sessionId.toLowerCase()}__${baseUrl.replaceAll(/([^.])\.([^.])/g, `$1_$2`)}__.${publicHost}`;
-  return newURL;
+  const url = new URL(realUrl);
+  const baseUrl = url.host;
+  const wrappedHost = `${sessionId.toLowerCase()}__${baseUrl.replaceAll(/([^.])\.([^.])/g, `$1_$2`)}__.${publicHost}`;
+  return `https://${wrappedHost}${url.pathname}${url.search}${url.hash}`;
 }
 
 function wrappedUrlToReal(wrappedUrl) {
@@ -16,7 +16,6 @@ function wrappedUrlToReal(wrappedUrl) {
   const realBaseUrl = baseUrl.replace(/_/g, `.`);
   return `https://${realBaseUrl}${url.pathname}${url.search}${url.hash}`;
 }
-
 function getSessionId() {
   const host = new URL(location.href).host;
   const [subdomain] = host.split(`__`);
@@ -36,23 +35,37 @@ function reportClientNavigation() {
   }).catch(() => {});
 }
 
+
+(function() {
+  const originalPushState = history.pushState;
+
+  history.pushState = function(state, title, url) {
+    // Convert SPA pushState into a full page load through the proxy so the main handler
+    // runs: it saves HTML to disk, updates the session JSONL, and re-injects the header
+    // bar with the correct path — none of which happens if we let the SPA handle it.
+    if (url) {
+      location.assign(url);
+    } else {
+      originalPushState.call(this, state, title, url);
+    }
+  };
+
+  // Browser back/forward: force a full reload so the proxy re-serves the correct page.
+  addEventListener(`popstate`, () => {
+    // reportClientNavigation();
+    location.replace(location.href);
+  });
+})();
+
 function wrapAndNavigate(realUrl, sessionId) {
   location.assign(realUrlToWrapped(realUrl, sessionId, new URL(location.href).host.split(`__.`)[1]));
 };
 
-(function() {
-  const originalPushState = history.pushState;
-  const originalReplaceState = history.replaceState;
-  history.pushState = function(...args) {
-    originalPushState.apply(this, args);
+const origHtml = document.documentElement.outerHTML;
+setTimeout(() => {
+  if (document.documentElement.outerHTML !== origHtml)
     reportClientNavigation();
-  };
-  history.replaceState = function(...args) {
-    originalReplaceState.apply(this, args);
-    reportClientNavigation();
-  };
-  addEventListener(`popstate`, reportClientNavigation);
-})();
+}, 1000);
 
 function navigateToSessionId(sessionId, publicHost = new URL(location.href).host.split(`__.`)[1]) {
   location.assign(`https://${sessionId.toLowerCase()}__.${publicHost}`);

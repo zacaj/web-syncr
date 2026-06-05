@@ -25,7 +25,7 @@ export async function injectHeaderAndScript(
   injectedJs: string,
 ): Promise<string> {
   const headerHtml = await renderToStringAsync(Header({ session, history }));
-  body = body.replace(/(<\s*body[^>]*>)/i, `$1` + headerHtml);
+  body = body.replace(/(<\s*body[^>]*>)/i, `$1` + headerHtml + `<div id="web-syncr-spacer" style="height:2rem"></div>`);
   body = body.replace(/(<\/\s*head)/i, `<script>${injectedJs}</script>$1`);
   return body;
 }
