@@ -9,7 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `pnpm docker:start` — Build and run dev Docker image
 - `pnpm docker:deploy` — Build, tag, push to registry, and restart via SSH on remote host
 
-No test runner is configured.
+- `pnpm test` — Run the Playwright E2E test suite (`tests/`)
+- `LIVE_TESTS=1 pnpm test tests/live-sites.spec.ts` — Opt-in live-site regression tests (require internet + HTTPS certs)
 
 ## Architecture
 
@@ -44,6 +45,32 @@ No test runner is configured.
 ### `common/` package
 
 Shared TypeScript utilities (`util/files.ts`, `util/index.ts`, etc.) and ESLint configs. Imported via `@common/*` and `common/*` path aliases. In production Docker, `build/common` is symlinked into `node_modules` as both `common` and `@common`.
+
+### Tests
+
+The suite lives in `tests/` and runs with Playwright (Chromium only). `global-setup.ts` starts:
+- The web-syncr server on port **29443** (using `.env` certs, isolated db at `/tmp/web-syncr-test-db`)
+- A mock HTTP server on port **38080** that serves controlled HTML pages and files from `tests/fixtures/`
+
+Test files:
+- `proxy.spec.ts` — core proxy behaviour: session creation, header injection, link rewriting, redirects, JSONL recording, SPA pushState
+- `home.spec.ts` — login flow and home page rendering
+- `fixtures.spec.ts` — proxying against captured real-site HTML (skips with a help message if the fixture isn't present)
+- `live-sites.spec.ts` — opt-in tests that fetch real external sites; enable with `LIVE_TESTS=1`
+
+### `scripts/mirror-page.ts`
+
+Captures a real web page as a local fixture for offline proxy tests.
+
+```
+npx tsx scripts/mirror-page.ts <url>
+```
+
+Writes two files under `tests/fixtures/{host_with_underscores}/{path}/`:
+- `.html` — raw HTML from the site
+- `.local.html` — same HTML with the site's hostname replaced by `localhost`
+
+The mock server serves `.local.html` at `/fixtures/{host}/{path}`. This lets `fixtures.spec.ts` test proxy rewriting against realistic markup without network access. When adding a new fixture-based test, run this script first and commit the `.local.html` file (the raw `.html` is for reference only).
 
 ## Key gotchas
 

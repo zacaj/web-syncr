@@ -29,6 +29,7 @@ const server = new Hono();
 function forwardHeaders(req: { raw: Request }) {
   const headers = new Headers(req.raw.headers);
   headers.delete(`host`);
+  headers.delete(`cookie`);
   return headers;
 }
 
@@ -50,7 +51,7 @@ const ignoreProxy: H<BlankEnv> = async (c) => {
       method: req.method,
       headers: forwardHeaders(req),
       body: req.raw.body,
-      signal: req.raw.signal,
+      signal: AbortSignal.any([req.raw.signal, AbortSignal.timeout(30_000)]),
     }).catch(err => {
       console.error(`Proxy Error: ${req.method} ${realUrl}: `, err);
       throw err;
@@ -270,7 +271,7 @@ server.all(`*`, async (c) => {
     method: req.method,
     headers: forwardHeaders(req),
     body: req.raw.body,
-    signal: req.raw.signal,
+    signal: AbortSignal.any([req.raw.signal, AbortSignal.timeout(30_000)]),
     redirect: `manual`,
   }).catch(err => {
     console.error(`Proxy Error: ${req.method} ${realUrl}: `, err);
