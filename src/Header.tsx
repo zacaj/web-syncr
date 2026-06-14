@@ -1,26 +1,27 @@
 import type { Opaque } from '@common/util';
 import { h, type TargetedEvent } from 'preact';
 import { useState } from "preact/hooks";
-import type { Session } from './config';
+import type { LoadMode, Session } from './config';
 import { realUrlToWrapped } from './urls';
 
 (globalThis as Hack).wrapAndNavigate = (realUrl: string, sessionId: string) => {
   location.assign(realUrlToWrapped(realUrl, sessionId, new URL(location.href).host.split(`__.`)[1]!));
 };
 
-export function Header({ session, history }: {
+export function Header({ session, history, mode }: {
   session: Session&{ sessionId: string };
   history: Session[];
+  mode: LoadMode;
 }) {
   // const [s, setS] = useState(1);
   return <div style={{ top: 0, right: 0, left: 0, background: `lightyellow`, color: `black`, zIndex: 2147483647, padding: `0.25rem`, position: `fixed`, display: `flex`, flexDirection: `row`, gap: `1rem`, pointerEvents: `all` }}>
-    <span>Session: {session.sessionId}</span>
+    {/* <span>Session: {session.sessionId}</span> */}
 
     {!!history[0] && session.timestamp < history[0].timestamp &&
-      // <button type="button" onClick={() =>
-      //   location.assign(realUrlToWrapped(history[0]!.url, session.sessionId, new URL(location.href).host.split(`__.`)[1]!))
-      // }>
-      <button type="button" onClick={`wrapAndNavigate('${history[0].url}', '${session.sessionId}')` as Hack}>
+      <button type="button"
+        data-url={history[0].url}
+        data-sid={session.sessionId}
+        onClick={`wrapAndNavigate(this.dataset.url, this.dataset.sid)` as Hack}>
         Latest
       </button>
     }
@@ -49,11 +50,21 @@ export function Header({ session, history }: {
     </button>
     <div id="sessions" style={{ position: `absolute`, zIndex: 1000, left: 0, right: 0, bottom: 0, top: `100%`, display: `none` }}>
       <div style={{ display: `flex`, flexDirection: `column`, gap: `1rem`, background: `white` }}>
-        {history.map(s => <button type="button" onClick={`wrapAndNavigate('${s.url}', '${session.sessionId}')` as Hack}>{s.url.replaceAll(/(www\.|https?|:\/\/)/g, ``)} - {s.timestamp}</button>)}
+        {history.map(s => <button type="button"
+          data-url={s.url}
+          data-sid={session.sessionId}
+          onClick={`wrapAndNavigate(this.dataset.url, this.dataset.sid)` as Hack}>{s.url.replaceAll(/(www\.|https?|:\/\/)/g, ``)} - {s.timestamp}</button>)}
       </div>
     </div>
 
-    {` `}
+    <select
+      value={mode}
+      data-sid={session.sessionId}
+      onChange={`e => setSessionMode(this.dataset.sid, e.target.value)` as Hack}
+    >
+      <option value="proxy">proxy</option>
+      <option value="magicurl">magicurl</option>
+    </select>
 
     <form action="/" method="post">
       <div style={ { display: `flex`, flexDirection: `row`, gap: `1rem` }}>

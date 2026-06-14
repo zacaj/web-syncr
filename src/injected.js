@@ -58,7 +58,12 @@ function reportClientNavigation() {
 })();
 
 function wrapAndNavigate(realUrl, sessionId) {
-  location.assign(realUrlToWrapped(realUrl, sessionId, new URL(location.href).host.split(`__.`)[1]));
+  try {
+    const wrapped = realUrlToWrapped(realUrl, sessionId, new URL(location.href).host.split(`__.`)[1]);
+    location.assign(wrapped);
+  } catch (e) {
+    console.error(`wrapAndNavigate failed for url "${realUrl}":`, e);
+  }
 };
 
 const origHtml = document.documentElement.outerHTML;
@@ -74,4 +79,12 @@ function navigateToSessionId(sessionId, publicHost = new URL(location.href).host
 function toggleSessions() {
   const e = document.getElementById(`sessions`);
   e.style.display = e.style.display !== `none` ? `none` : `block`;
+}
+
+function setSessionMode(sessionId, mode) {
+  fetch(`/__session-mode`, {
+    method: `POST`,
+    headers: { 'Content-Type': `application/json` },
+    body: JSON.stringify({ sessionId, mode }),
+  }).then(() => location.reload()).catch(() => {});
 }

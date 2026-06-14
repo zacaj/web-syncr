@@ -12,7 +12,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
 import * as Path from 'node:path';
 import { renderToStringAsync } from "preact-render-to-string";
-import { env, type Session, type SessionHead } from "./config";
+import { env, type LoadMode, type Session, type SessionHead } from "./config";
 import { Home } from "./Home";
 import { injectHeaderAndScript, replaceAllPatterns } from "./rewrite";
 import { parseSubdomain, realUrlToWrapped, wrappedUrlToReal } from "./urls";
@@ -22,6 +22,19 @@ export type { Session, SessionHead };
 
 function sessionPath(sessionId: string) {
   return `${env.dbPath}/session_${sessionId}.jsonl`;
+}
+
+function sessionConfigPath(sessionId: string) {
+  return `${env.dbPath}/session_${sessionId}.config.json`;
+}
+
+function getSessionMode(sessionId: string): LoadMode {
+  const path = sessionConfigPath(sessionId);
+  if (existsSync(path)) {
+    try { return (JSON.parse(readFileSync(path, `utf8`)) as { mode: LoadMode }).mode ?? `proxy` }
+    catch { return `proxy` }
+  }
+  return `proxy`;
 }
 
 const server = new Hono();
@@ -149,6 +162,16 @@ server.post(`/__client-nav`, async (c) => {
 
   c.status(200);
   return c.json({ ok: true, session });
+});
+
+server.post(`/__session-mode`, async c => {
+  const { sessionId, mode } = await c.req.json<{ sessionId: string; mode: LoadMode }>();
+  if (!existsSync(sessionPath(sessionId))) {
+    c.status(404);
+    return c.json({ error: `Session not found` });
+  }
+  await writeFile(sessionConfigPath(sessionId), JSON.stringify({ mode }));
+  return c.json({ ok: true });
 });
 
 console.log(`Version: 5.1`);
@@ -321,8 +344,12 @@ server.all(`*`, async (c) => {
   const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
   let newBody = replaceAllPatterns(body, replacements) ?? (isHtml ? body : null);
   if (newBody) {
-    newBody = await injectHeaderAndScript(newBody, { ...session, sessionId: sessionId }, sessions, injectedJs);
-    return new Response(newBody, response);
+    newBody = await injectHeaderAndScript(newBody, { ...session, sessionId: sessionId }, sessions, injectedJs, getSessionMode(sessionId));
+    const responseHeaders = new Headers(response.headers);
+    responseHeaders.delete(`content-security-policy`);
+    responseHeaders.delete(`content-security-policy-report-only`);
+    responseHeaders.delete(`x-frame-options`);
+    return new Response(newBody, { status: response.status, statusText: response.statusText, headers: responseHeaders });
   }
   else
     return originalResponse;

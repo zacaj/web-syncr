@@ -1,6 +1,6 @@
 import { renderToStringAsync } from "preact-render-to-string";
 import { Header } from "./Header";
-import type { Session } from "./config";
+import type { LoadMode, Session } from "./config";
 
 export function replaceAllPatterns(body: string, replacements: Dict<string>): string | null {
   let replaced = 0;
@@ -23,9 +23,9 @@ export async function injectHeaderAndScript(
   session: Session & { sessionId: string },
   history: Session[],
   injectedJs: string,
+  mode: LoadMode = `proxy`,
 ): Promise<string> {
-  const headerHtml = await renderToStringAsync(Header({ session, history }));
-  body = body.replace(/(<\s*body[^>]*>)/i, `$1` + headerHtml + `<div id="web-syncr-spacer" style="height:2rem"></div>`);
-  body = body.replace(/(<\/\s*head)/i, `<script>${injectedJs}</script>$1`);
+  const headerHtml = await renderToStringAsync(Header({ session, history, mode }));
+  body = body.replace(/(<\s*body[^>]*>)/i, `$1<script>${injectedJs}</script>` + headerHtml + `<div id="web-syncr-spacer" style="height:2rem"></div>`);
   return body;
 }

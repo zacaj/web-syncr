@@ -12,6 +12,8 @@ export const env = {
   ...process.env,
 };
 
+export type LoadMode = `proxy` | `magicurl`;
+
 export type Session = {
   url: string;
   timestamp: JsonDate;
