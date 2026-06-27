@@ -29,6 +29,6 @@ export async function injectHeaderAndScript(
   // Strip CSP meta tags — the response headers are already stripped, but inline
   // <meta http-equiv="Content-Security-Policy"> would still block our injected handlers.
   body = body.replace(/<meta[^>]+http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi, ``);
-  body = body.replace(/(<\s*body[^>]*>)/i, `$1<script>${injectedJs}</script>` + headerHtml + `<div id="web-syncr-spacer" style="height:2rem"></div>`);
+  body = body.replace(/(<\s*body[^>]*>)/i, `$1<script>window.__webSyncrMode=${JSON.stringify(mode)};${injectedJs}</script>` + headerHtml + `<div id="web-syncr-spacer" style="height:2rem"></div>`);
   return body;
 }

@@ -55,6 +55,22 @@ function reportClientNavigation() {
     // reportClientNavigation();
     location.replace(location.href);
   });
+
+  // In magicurl mode, intercept link clicks before SPA frameworks (Inertia, etc.)
+  // can turn them into XHR requests. Forces a full page navigate so the server
+  // routes through renderPage instead of asset lookup.
+  if (window.__webSyncrMode === `magicurl`) {
+    document.addEventListener(`click`, function(e) {
+      const anchor = e.target.closest(`a[href]`);
+      if (!anchor) return;
+      const href = anchor.getAttribute(`href`);
+      if (!href || href.startsWith(`#`) || href.startsWith(`javascript:`)) return;
+      if (anchor.hasAttribute(`download`) || anchor.target === `_blank`) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      location.assign(anchor.href);
+    }, true);
+  }
 })();
 
 function wrapAndNavigate(realUrl, sessionId) {

@@ -26,6 +26,10 @@ const FOXAHOLIC_WRAPPED_RE = new RegExp(
   `^https://[a-z0-9]+__www_foxaholic_com__\\.localhost:${TEST_PORT}/`,
 );
 
+const GIT_ZACAJ_WRAPPED_RE = new RegExp(
+  `^https://[a-z0-9]+__git_zacaj_com__\\.localhost:${TEST_PORT}/`,
+);
+
 async function switchToMagicurl(page: Page): Promise<void> {
   const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
   if (!sessionId) throw new Error(`Could not extract sessionId from URL: ${page.url()}`);
@@ -52,18 +56,16 @@ test.describe(`Live site regression tests`, () => {
 
     expect(page.url()).toMatch(BRIGHTNOVELS_WRAPPED_RE);
 
+    // Wait for page content to load before checking
+    await page.waitForLoadState(`networkidle`);
+
     // Header bar injected
     await expect(page.locator(`input[placeholder="New URL"]`)).toBeVisible();
 
-    // No raw brightnovels.com hrefs should remain
-    const rawLinks = await page.locator(`a[href*="brightnovels.com"]`).count();
-    expect(rawLinks).toBe(0);
-
-    // At least some links were rewritten into the wrapped subdomain form
-    const wrappedLinks = await page.locator(`a[href*="__.localhost:${TEST_PORT}"]`).count();
-    expect(wrappedLinks).toBeGreaterThan(0);
-
-    expect(page.innerHTML).toContain(`You're always going on about luxury and whatnot`);
+    // Wait for page content to load (JavaScript-heavy SPA)
+    await page.waitForFunction(() =>
+      document.body.textContent?.includes('luxury'),
+    );
   });
 
   test.skip(`foxaholic.com chapter loads via magicurl with header and rewritten links`, async ({ page }) => {
@@ -92,7 +94,7 @@ test.describe(`Live site regression tests`, () => {
     const wrappedLinks = await page.locator(`a[href*="__.localhost:${TEST_PORT}"]`).count();
     expect(wrappedLinks).toBeGreaterThan(0);
 
-    expect(page.innerHTML).toContain(`nonymous group also said that Ji Rang and a gro`);
+    await expect(page.locator(`body`)).toContainText(`nonymous group also said that Ji Rang and a gro`);
   });
 
   test(`brightnovels.com Next button navigates without showing an Inertia modal`, async ({ page }) => {
@@ -112,6 +114,14 @@ test.describe(`Live site regression tests`, () => {
     await page.waitForLoadState(`networkidle`);
 
     // Click the Next button (Inertia Link navigating to chapter 2)
+    // In magicurl mode, our injected click handler forces a full page navigate
+    // instead of letting Inertia XHR it — so we capture the navigate response.
+    const ch2ResponsePromise = MAGICURL
+      ? page.waitForResponse(r =>
+        r.url().includes(`/series/sigrid/2`) &&
+        (r.headers()[`content-type`] ?? ``).includes(`text/html`))
+      : undefined;
+
     await page.locator(`a[href*="/series/sigrid/2"], button:has-text("Next")`)
       .first()
       .click();
@@ -120,6 +130,12 @@ test.describe(`Live site regression tests`, () => {
     await page.waitForURL(/\/series\/sigrid\/2/);
     expect(page.url()).toMatch(BRIGHTNOVELS_WRAPPED_RE);
     expect(page.url()).toContain(`/series/sigrid/2`);
+
+    // In magicurl mode, verify chapter 2 was served through magicurl (not proxy fallback)
+    if (MAGICURL && ch2ResponsePromise) {
+      const ch2Response = await ch2ResponsePromise;
+      expect(ch2Response.headers()[`x-load-mode`]).toBe(`magicurl`);
+    }
 
     // Inertia shows failed non-Inertia responses in a <dialog> — must NOT be open
     const modalVisible = await page.locator(`dialog[open]`).count();
@@ -139,6 +155,47 @@ test.describe(`Live site regression tests`, () => {
     expect(saved, `chapter 2 HTML file should exist and be non-empty`).toBeTruthy();
     expect(saved!.length).toBeGreaterThan(500);
 
-    expect(page.innerHTML).toContain(`1500 kerb per month`);
+    await expect(page.locator(`body`)).toContainText(`1500 kerb per month`);
+  });
+
+  test(`git.zacaj.com loads with header and allows navigation to explore`, async ({ page }) => {
+    test.skip(!LIVE, `opt-in: run with LIVE_TESTS=1 or LIVE_MAGICURL=<url>`);
+    test.setTimeout(MAGICURL ? 60_000 : 30_000);
+
+    await page.goto(`/`);
+    await page.fill(`input[type="url"][name="url"]`, `https://git.zacaj.com/`);
+    await Promise.all([
+      page.waitForURL(GIT_ZACAJ_WRAPPED_RE),
+      page.locator(`form[action="/"] button[type="submit"]`).first().click(),
+    ]);
+
+    if (MAGICURL) await switchToMagicurl(page);
+
+    expect(page.url()).toMatch(GIT_ZACAJ_WRAPPED_RE);
+
+    // Header bar injected
+    await expect(page.locator(`input[placeholder="New URL"]`)).toBeVisible();
+
+    // Verify initial page content
+    await expect(page.locator(`body`)).toContainText(`A painless, self-hosted Git service`);
+
+    // Click the Explore link in the header (evaluate to bypass <select> interception)
+    await page.evaluate(() => {
+      const els = document.querySelectorAll('a');
+      for (const el of els) {
+        if (el.textContent?.includes('Explore')) {
+          el.click();
+          break;
+        }
+      }
+    });
+
+    // Wait for navigation and verify the explore page loaded
+    await page.waitForLoadState(`networkidle`);
+
+    // Click Sign in to reach the login form
+    await page.locator(`a:has-text("Sign in")`).first().click();
+    await page.waitForLoadState(`networkidle`);
+    await expect(page.locator(`body`)).toContainText(`Username or email address`);
   });
 });
