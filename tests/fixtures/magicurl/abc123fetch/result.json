@@ -1,0 +1,49 @@
+{
+  "fetchId": "abc123fetch",
+  "sessionId": "magic-session-1",
+  "requestedUrl": "http://localhost/page2",
+  "finalUrl": "http://localhost/page2",
+  "status": 200,
+  "startedAt": "2026-06-14T00:00:00.000Z",
+  "finishedAt": "2026-06-14T00:00:05.000Z",
+  "durationMs": 5000,
+  "request": {
+    "extraHeaders": {},
+    "cookiesSent": []
+  },
+  "response": {
+    "headers": { "content-type": "text/html" },
+    "cookiesAfter": []
+  },
+  "dom": { "path": "dom.html", "bytes": 150 },
+  "assets": [
+    {
+      "url": "http://localhost/page2/style.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "fromCache": false,
+      "headers": {},
+      "path": "a1b2c3.css",
+      "bytes": 50
+    },
+    {
+      "url": "http://localhost/page2/app.js",
+      "status": 200,
+      "mimeType": "application/javascript",
+      "fromCache": false,
+      "headers": {},
+      "path": "d4e5f6.js",
+      "bytes": 100
+    },
+    {
+      "url": "http://localhost/page2/logo.png",
+      "status": 200,
+      "mimeType": "image/png",
+      "fromCache": false,
+      "headers": {},
+      "path": "g7h8i9.png",
+      "bytes": 200
+    }
+  ],
+  "bundlePath": "/data/fetches/abc123fetch"
+}

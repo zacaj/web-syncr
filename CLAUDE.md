@@ -28,6 +28,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - Injects `src/injected.js` before `</head>` to intercept client-side navigation (pushState/replaceState/popstate) and report it to `POST /__client-nav`.
 4. Non-HTML resources (JS, favicon, robots.txt, .well-known) bypass injection via `ignoreProxy`.
 
+### Load modes
+
+Each session has a `mode` (set via the Header dropdown or `POST /__session-mode`):
+
+- **`proxy`** (default): Live streaming proxy — passes requests through to upstream.
+- **`magicurl`**: Headless-browser rendering backend — uses the magicurl service to render pages
+  through a real Camoufox/Playwright browser, solving JS-heavy SPA challenges and anti-bot walls.
+
+When `magicurl` mode is active:
+- Page navigations go through `src/magicurl.ts` → `POST /sessions/:id/fetch` → disk mount.
+- Asset requests try the magicurl disk mount first (`lookupAsset` + `streamAsset`), then fall
+  back to the live proxy with a `MAGICURL MISS` warning.
+- If the magicurl API is unreachable, the entire request falls back to the live proxy.
+
+Config options (`.env`):
+- `magicurlApi` — REST API base URL for the magicurl service (default: `http://host.docker.internal:3005`)
+- `magicurlMount` — Read-only bind mount path for magicurl's `/data/fetches` (default: `/magicurl-data`)
+
 ### Session persistence
 
 - Each session is a JSONL file: `db/session_{sessionId}.jsonl` — each line is a `Session` (`url` + `timestamp`).
@@ -56,6 +74,7 @@ Test files:
 - `proxy.spec.ts` — core proxy behaviour: session creation, header injection, link rewriting, redirects, JSONL recording, SPA pushState
 - `home.spec.ts` — login flow and home page rendering
 - `fixtures.spec.ts` — proxying against captured real-site HTML (skips with a help message if the fixture isn't present)
+- `magicurl.spec.ts` — magicurl mode: manifest lookup, DOM serving, URL rewriting, miss→proxy fallback, mode switching
 - `live-sites.spec.ts` — opt-in tests that fetch real external sites; enable with `LIVE_TESTS=1`
 
 ### `scripts/mirror-page.ts`

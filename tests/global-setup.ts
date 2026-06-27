@@ -104,15 +104,17 @@ export default async function globalSetup() {
 
   // Start the web-syncr server with test config
   const baseEnv = readDotEnv(`./.env`);
+  const magicurlUrl = process.env.LIVE_MAGICURL;
+  const isLive = process.env.LIVE_TESTS || magicurlUrl;
   const env = {
     ...process.env,
     ...baseEnv,
     localPort: String(TEST_PORT),
     publicPort: String(TEST_PORT),
     publicHost: `localhost:${TEST_PORT}`,
-    proxyPort: String(MOCK_PORT),
-    proxyProtocol: `http`,
+    ...(!isLive ? { proxyPort: String(MOCK_PORT), proxyProtocol: `http` } : {}),
     dbPath: DB_TEST_PATH,
+    ...(magicurlUrl && magicurlUrl !== `1` ? { magicurlApi: magicurlUrl } : {}),
   };
 
   const proc = spawn(`node_modules/.bin/tsx`, [`src/server`], {

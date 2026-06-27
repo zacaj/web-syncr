@@ -12,8 +12,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
 import * as Path from 'node:path';
 import { renderToStringAsync } from "preact-render-to-string";
-import { env, type LoadMode, type Session, type SessionHead } from "./config";
+import { env, sessionConfigPath as sessionConfigPathFn, type LoadMode, type Session, type SessionHead } from "./config";
 import { Home } from "./Home";
+import { getDomHtml, lookupAsset, renderPage, streamAsset } from './magicurl';
 import { injectHeaderAndScript, replaceAllPatterns } from "./rewrite";
 import { parseSubdomain, realUrlToWrapped, wrappedUrlToReal } from "./urls";
 
@@ -24,14 +25,10 @@ function sessionPath(sessionId: string) {
   return `${env.dbPath}/session_${sessionId}.jsonl`;
 }
 
-function sessionConfigPath(sessionId: string) {
-  return `${env.dbPath}/session_${sessionId}.config.json`;
-}
-
 function getSessionMode(sessionId: string): LoadMode {
-  const path = sessionConfigPath(sessionId);
+  const path = sessionConfigPathFn(sessionId);
   if (existsSync(path)) {
-    try { return (JSON.parse(readFileSync(path, `utf8`)) as { mode: LoadMode }).mode ?? `proxy` }
+    try { return (JSON.parse(readFileSync(path, `utf8`)) as { mode?: LoadMode }).mode ?? `proxy` }
     catch { return `proxy` }
   }
   return `proxy`;
@@ -58,6 +55,23 @@ const ignoreProxy: H<BlankEnv> = async (c) => {
     newUrl.host = `${parsed.baseUrl}:${env.proxyPort}`;
     newUrl.protocol = `${env.proxyProtocol}:`;
     const realUrl = newUrl.toString();
+    const sessionId = parsed.sessionId;
+
+    // If magicurl mode, try serving from mount first
+    if (sessionId && getSessionMode(sessionId) === `magicurl`) {
+      const hit = await lookupAsset(sessionId, realUrl);
+      if (hit) {
+        const stream = streamAsset(hit.absPath);
+        if (stream) {
+          const headers = new Headers();
+          headers.set(`content-type`, hit.mimeType);
+          headers.set(`content-length`, String(stream.contentLength));
+          return new Response(stream.stream, { status: 200, headers });
+        }
+      }
+      // Miss — fall through to live proxy with warning
+      console.warn(`MAGICURL MISS (ignoreProxy): ${realUrl} not in snapshot — falling back to live proxy`);
+    }
 
     return await proxy(realUrl, {
       ...req.raw, // eslint-disable-line @typescript-eslint/no-misused-spread
@@ -170,7 +184,12 @@ server.post(`/__session-mode`, async c => {
     c.status(404);
     return c.json({ error: `Session not found` });
   }
-  await writeFile(sessionConfigPath(sessionId), JSON.stringify({ mode }));
+  // Preserve existing magicSessionId when switching modes
+  const cfgPath = sessionConfigPathFn(sessionId);
+  const existing = existsSync(cfgPath)
+    ? (() => { try { return JSON.parse(readFileSync(cfgPath, `utf8`)) as Dict } catch { return {} } })()
+    : {};
+  await writeFile(cfgPath, JSON.stringify({ mode, magicSessionId: existing.magicSessionId }));
   return c.json({ ok: true });
 });
 
@@ -290,6 +309,60 @@ server.all(`*`, async (c) => {
       return c.text(`No session or URL found`);
   }
 
+  const mode = getSessionMode(sessionId);
+
+  // ── Magicurl mode ──────────────────────────────────────────────────────────
+  if (mode === `magicurl`) {
+    const isPage = req.header(`Sec-Fetch-Mode`) === `navigate` && new URL(realUrl).pathname.length > 1;
+    const isRefresh = req.header(`Referer`) === req.url || req.header(`Refresh`);
+
+    try {
+      if (isPage) {
+        // Page navigation: render through magicurl
+        const result = await renderPage(sessionId, realUrl, { force: !!isRefresh });
+        const body = await getDomHtml(result.fetchId);
+
+        // Run existing rewrite pipeline (backend-agnostic)
+        const replacements: Dict<string> = {};
+        replacements[baseUrl] ??= `${subdomain}__.${publicHost}`;
+        replacements[encodeURIComponent(baseUrl)] ??= encodeURIComponent(`${subdomain}__.${publicHost}`);
+        replacements[encodeURI(baseUrl)] ??= encodeURI(`${subdomain}__.${publicHost}`);
+
+        const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
+        let newBody = replaceAllPatterns(body, replacements) ?? body;
+        newBody = await injectHeaderAndScript(newBody, { ...session, sessionId }, sessions, injectedJs, mode);
+
+        const responseHeaders = new Headers();
+        responseHeaders.set(`content-type`, `text/html; charset=utf-8`);
+        responseHeaders.set(`x-load-mode`, `magicurl`);
+        responseHeaders.delete(`content-security-policy`);
+        responseHeaders.delete(`content-security-policy-report-only`);
+        responseHeaders.delete(`x-frame-options`);
+        return new Response(newBody, { status: 200, headers: responseHeaders });
+      }
+      else {
+        // Asset request: try mount first, fall through to proxy on miss
+        const hit = await lookupAsset(sessionId, realUrl);
+        if (hit) {
+          const stream = streamAsset(hit.absPath);
+          if (stream) {
+            const headers = new Headers();
+            headers.set(`content-type`, hit.mimeType);
+            headers.set(`content-length`, String(stream.contentLength));
+            return new Response(stream.stream, { status: 200, headers });
+          }
+        }
+        // Miss — fall through to proxy with warning
+        console.warn(`MAGICURL MISS: ${realUrl} not in snapshot — falling back to live proxy`);
+      }
+    }
+    catch (err) {
+      // Magicurl API unreachable or error — fall through to proxy
+      console.warn(`MAGICURL ERROR: ${(err as Error).message ?? String(err)} — falling back to live proxy`);
+    }
+  }
+
+  // ── Proxy mode (or magicurl miss fallback) ─────────────────────────────────
   const response = await proxy(realUrl, {
     method: req.method,
     headers: forwardHeaders(req),
@@ -344,7 +417,7 @@ server.all(`*`, async (c) => {
   const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
   let newBody = replaceAllPatterns(body, replacements) ?? (isHtml ? body : null);
   if (newBody) {
-    newBody = await injectHeaderAndScript(newBody, { ...session, sessionId: sessionId }, sessions, injectedJs, getSessionMode(sessionId));
+    newBody = await injectHeaderAndScript(newBody, { ...session, sessionId: sessionId }, sessions, injectedJs, mode);
     const responseHeaders = new Headers(response.headers);
     responseHeaders.delete(`content-security-policy`);
     responseHeaders.delete(`content-security-policy-report-only`);

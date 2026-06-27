@@ -9,6 +9,8 @@
     start: "tsx --env-file=.env src/server",
     typecheck: "tsc --noEmitOnError --noEmit false",
     test: "playwright test",
+    "test:live": "LIVE_TESTS=1 playwright test tests/live-sites.spec.ts",
+    "test:live:magicurl": "LIVE_MAGICURL=http://100.111.42.92:3005 playwright test tests/live-sites.spec.ts",
     lint: "eslint .",
     "lint:fix": "eslint --fix .",
 

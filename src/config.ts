@@ -9,10 +9,17 @@ export const env = {
   proxyPort: 443,
   proxyProtocol: `https`,
   dbPath: `./db`,
+  magicurlApi: `http://host.docker.internal:3005`,
+  magicurlMount: `/magicurl-data`,
   ...process.env,
 };
 
 export type LoadMode = `proxy` | `magicurl`;
+
+/** Build the path to a session's config JSON file (mode + magicurl session ID) */
+export function sessionConfigPath(sessionId: string) {
+  return `${env.dbPath}/session_${sessionId}.config.json`;
+}
 
 export type Session = {
   url: string;

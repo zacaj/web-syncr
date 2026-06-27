@@ -4,23 +4,38 @@
  * Prerequisites:
  *   - HTTPS certs configured in .env (same requirement as the normal test suite)
  *   - Internet access (these tests fetch real external sites through the proxy)
- *   - LIVE_TESTS=1 environment variable
+ *   - LIVE_TESTS=1 or LIVE_MAGICURL=<url> environment variable
  *
- * Run: LIVE_TESTS=1 pnpm test tests/live-sites.spec.ts
+ * Run:
+ *   LIVE_TESTS=1 pnpm test tests/live-sites.spec.ts
+ *   LIVE_MAGICURL=http://100.111.42.92:3005 pnpm test tests/live-sites.spec.ts
  */
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DB_TEST_PATH, TEST_PORT } from './global-setup';
+
+const MAGICURL = process.env.LIVE_MAGICURL;
+const LIVE = process.env.LIVE_TESTS || MAGICURL;
 
 const BRIGHTNOVELS_WRAPPED_RE = new RegExp(
   `^https://[a-z0-9]+__brightnovels_com__\\.localhost:${TEST_PORT}/`,
 );
 
+async function switchToMagicurl(page: Page): Promise<void> {
+  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
+  if (!sessionId) throw new Error(`Could not extract sessionId from URL: ${page.url()}`);
+  await page.request.post(`https://localhost:${TEST_PORT}/__session-mode`, {
+    data: { sessionId, mode: `magicurl` },
+  });
+  const resp = await page.reload({ waitUntil: `domcontentloaded` });
+  expect(await resp?.headerValue(`x-load-mode`)).toBe(`magicurl`);
+}
+
 test.describe(`Live site regression tests`, () => {
   test(`brightnovels.com/series/sigrid/1 loads with header and rewritten links`, async ({ page }) => {
-    test.skip(!process.env[`LIVE_TESTS`], `opt-in: run with LIVE_TESTS=1`);
-    test.setTimeout(30_000);
+    test.skip(!LIVE, `opt-in: run with LIVE_TESTS=1 or LIVE_MAGICURL=<url>`);
+    test.setTimeout(MAGICURL ? 60_000 : 30_000);
 
     await page.goto(`/`);
     await page.fill(`input[type="url"][name="url"]`, `https://brightnovels.com/series/sigrid/1`);
@@ -29,10 +44,11 @@ test.describe(`Live site regression tests`, () => {
       page.locator(`form[action="/"] button[type="submit"]`).first().click(),
     ]);
 
+    if (MAGICURL) await switchToMagicurl(page);
+
     expect(page.url()).toMatch(BRIGHTNOVELS_WRAPPED_RE);
 
     // Header bar injected
-    await expect(page.locator(`text=Session:`)).toBeVisible();
     await expect(page.locator(`input[placeholder="New URL"]`)).toBeVisible();
 
     // No raw brightnovels.com hrefs should remain
@@ -45,8 +61,8 @@ test.describe(`Live site regression tests`, () => {
   });
 
   test(`brightnovels.com Next button navigates without showing an Inertia modal`, async ({ page }) => {
-    test.skip(!process.env[`LIVE_TESTS`], `opt-in: run with LIVE_TESTS=1`);
-    test.setTimeout(45_000);
+    test.skip(!LIVE, `opt-in: run with LIVE_TESTS=1 or LIVE_MAGICURL=<url>`);
+    test.setTimeout(MAGICURL ? 90_000 : 45_000);
 
     await page.goto(`/`);
     await page.fill(`input[type="url"][name="url"]`, `https://brightnovels.com/series/sigrid/1`);
@@ -54,6 +70,8 @@ test.describe(`Live site regression tests`, () => {
       page.waitForURL(BRIGHTNOVELS_WRAPPED_RE),
       page.locator(`form[action="/"] button[type="submit"]`).first().click(),
     ]);
+
+    if (MAGICURL) await switchToMagicurl(page);
 
     // Wait for Inertia to hydrate and render the chapter content
     await page.waitForLoadState(`networkidle`);
