@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
+import { expect, type Page } from '@playwright/test';
 import { join } from 'node:path';
 
 export const PID_FILE = `/tmp/web-syncr-test-server.pid`;
@@ -38,6 +39,52 @@ export const MOCK_PAGES: Record<string, { title: string; html: string }> = {
     </body></html>`,
   },
 };
+
+// ── Shared test helpers ──────────────────────────────────────────────────────
+
+/**
+ * Navigate to the web-syncr home page and create a new session by filling
+ * the URL form. Resolves when the page has navigated to the wrapped subdomain.
+ *
+ * @param originUrl — the URL to proxy (e.g. `http://localhost/page2` or `https://example.com`)
+ * @param wrappedRe — expected wrapped URL pattern (defaults to the `localhost` fixture pattern)
+ */
+export async function createSession(
+  page: Page,
+  originUrl = `http://localhost/`,
+  wrappedRe: RegExp = new RegExp(
+    `^https://[a-z0-9]+__localhost__\\.localhost:${TEST_PORT}/`,
+  ),
+): Promise<void> {
+  await page.goto(`/`);
+  await page.fill(`input[type="url"][name="url"]`, originUrl);
+  await Promise.all([
+    page.waitForURL(wrappedRe),
+    page.locator(`form[action="/"] button[type="submit"]`).first().click(),
+  ]);
+}
+
+/**
+ * Extract the session ID from the current page URL.
+ */
+export function extractSessionId(url: string): string | undefined {
+  return url.match(/^https:\/\/([a-z0-9]+)__/)?.[1];
+}
+
+/**
+ * Assert that the session header bar is present and visible.
+ */
+export async function assertHeaderPresent(page: Page): Promise<void> {
+  await expect(page.locator(`input[placeholder="New URL"]`)).toBeVisible();
+}
+
+/**
+ * Assert that the body contains the given text, waiting up to the default timeout.
+ * Useful for JS-heavy SPA sites where the content may not be immediately visible.
+ */
+export async function assertPageContent(page: Page, text: string, timeout?: number): Promise<void> {
+  await expect(page.locator(`body`)).toContainText(text, timeout ? { timeout } : undefined);
+}
 
 function readDotEnv(path: string): Record<string, string> {
   try {

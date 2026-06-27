@@ -313,7 +313,7 @@ server.all(`*`, async (c) => {
 
   // ── Magicurl mode ──────────────────────────────────────────────────────────
   if (mode === `magicurl`) {
-    const isPage = req.header(`Sec-Fetch-Mode`) === `navigate` && new URL(realUrl).pathname.length > 1;
+    const isPage = req.header(`Sec-Fetch-Mode`) === `navigate`;
     const isRefresh = req.header(`Referer`) === req.url || req.header(`Refresh`);
 
     try {
@@ -321,6 +321,21 @@ server.all(`*`, async (c) => {
         // Page navigation: render through magicurl
         const result = await renderPage(sessionId, realUrl, { force: !!isRefresh });
         const body = await getDomHtml(result.fetchId);
+
+        try {
+          let savePath = Path.join(`${env.dbPath}/session_${sessionId}`, new URL(realUrl).pathname);
+          if (savePath.endsWith(`/`))
+            savePath += `index.html`;
+          else if (!Path.extname(savePath))
+            savePath += `.html`;
+          if (!existsSync(savePath) || statSync(savePath).size < 1000) {
+            console.info(`Save ${realUrl} to ${savePath} (${Math.round(body.length / 1024)}kB)`);
+            await mkdir(Path.dirname(savePath), { recursive: true });
+            await writeFile(savePath, body);
+          }
+        } catch (err) {
+          console.error(`Error saving ${realUrl}:`, err);
+        }
 
         // Run existing rewrite pipeline (backend-agnostic)
         const replacements: Dict<string> = {};

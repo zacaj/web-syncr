@@ -1,7 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DB_TEST_PATH, MOCK_PORT, TEST_PORT } from './global-setup';
+import {
+  DB_TEST_PATH,
+  TEST_PORT,
+  createSession,
+  extractSessionId,
+} from './global-setup';
 
 // Magicurl fixture data
 const MAGICURL_MOUNT = join(process.cwd(), `tests/fixtures/magicurl`);
@@ -16,12 +21,7 @@ const WRAPPED_URL_RE = new RegExp(
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 async function createMagicurlSession(page: Page) {
-  await page.goto(`/`);
-  await page.fill(`input[type="url"][name="url"]`, `http://localhost/page2`);
-  await Promise.all([
-    page.waitForURL(WRAPPED_URL_RE),
-    page.locator(`form[action="/"] button[type="submit"]`).first().click(),
-  ]);
+  await createSession(page, `http://localhost/page2`, WRAPPED_URL_RE);
 }
 
 // ── Manifest lookup tests ───────────────────────────────────────────────────
@@ -29,7 +29,7 @@ async function createMagicurlSession(page: Page) {
 test(`magicurl manifest lookup finds asset by exact URL`, async ({ page }) => {
   // Create a session, then manually set its config to magicurl mode
   await createMagicurlSession(page);
-  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
+  const sessionId = extractSessionId(page.url());
   expect(sessionId).toBeTruthy();
 
   // Write magicurl session config
@@ -49,7 +49,7 @@ test(`magicurl manifest lookup finds asset by exact URL`, async ({ page }) => {
 
 test(`magicurl DOM is served from mount`, async ({ page }) => {
   await createMagicurlSession(page);
-  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
+  const sessionId = extractSessionId(page.url());
   expect(sessionId).toBeTruthy();
 
   // Write magicurl config
@@ -67,7 +67,7 @@ test(`magicurl DOM is served from mount`, async ({ page }) => {
 
 test(`magicurl asset lookup returns correct mimeType`, async ({ page }) => {
   await createMagicurlSession(page);
-  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
+  const sessionId = extractSessionId(page.url());
   expect(sessionId).toBeTruthy();
 
   // Write magicurl config
@@ -86,7 +86,7 @@ test(`magicurl asset lookup returns correct mimeType`, async ({ page }) => {
 
 test(`magicurl mode HTML is rewritten with wrapped URLs`, async ({ page }) => {
   await createMagicurlSession(page);
-  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
+  const sessionId = extractSessionId(page.url());
   expect(sessionId).toBeTruthy();
 
   // Write magicurl config pointing to fixture
@@ -104,7 +104,7 @@ test(`magicurl mode HTML is rewritten with wrapped URLs`, async ({ page }) => {
 test(`magicurl miss falls back to proxy`, async ({ page }) => {
   // Create a session with magicurl mode but no matching asset
   await createMagicurlSession(page);
-  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
+  const sessionId = extractSessionId(page.url());
   expect(sessionId).toBeTruthy();
 
   const configPath = join(DB_TEST_PATH, `session_${sessionId}.config.json`);
@@ -119,7 +119,7 @@ test(`magicurl miss falls back to proxy`, async ({ page }) => {
 
 test(`session config preserves magicSessionId when switching modes`, async ({ page }) => {
   await createMagicurlSession(page);
-  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
+  const sessionId = extractSessionId(page.url());
   expect(sessionId).toBeTruthy();
 
   const configPath = join(DB_TEST_PATH, `session_${sessionId}.config.json`);
@@ -160,7 +160,7 @@ test(`mode select in header shows magicurl option`, async ({ page }) => {
 
 test(`selecting magicurl from dropdown posts to __session-mode and reloads`, async ({ page }) => {
   await createMagicurlSession(page);
-  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
+  const sessionId = extractSessionId(page.url());
   expect(sessionId).toBeTruthy();
 
   // Select magicurl from the dropdown (the actual user interaction)
@@ -184,14 +184,9 @@ test(`selecting magicurl from dropdown posts to __session-mode and reloads`, asy
 
 test(`default mode is proxy for new sessions`, async ({ page }) => {
   // Fresh session should default to proxy mode
-  await page.goto(`/`);
-  await page.fill(`input[type="url"][name="url"]`, `http://localhost/`);
-  await Promise.all([
-    page.waitForURL(WRAPPED_URL_RE),
-    page.locator(`form[action="/"] button[type="submit"]`).first().click(),
-  ]);
+  await createSession(page);
 
-  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
+  const sessionId = extractSessionId(page.url());
   expect(sessionId).toBeTruthy();
 
   const configPath = join(DB_TEST_PATH, `session_${sessionId}.config.json`);

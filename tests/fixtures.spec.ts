@@ -1,7 +1,12 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { TEST_PORT } from './global-setup';
+import {
+  TEST_PORT,
+  createSession,
+  assertHeaderPresent,
+  assertPageContent,
+} from './global-setup';
 
 function fixtureExists(relPath: string) {
   return existsSync(join(process.cwd(), `tests/fixtures`, `${relPath}.local.html`));
@@ -12,15 +17,6 @@ function fixtureExists(relPath: string) {
 const WRAPPED_URL_RE = new RegExp(
   `^https://[a-z0-9]+__localhost__\\.localhost:${TEST_PORT}/`,
 );
-
-async function createSession(page: Page, path = ``) {
-  await page.goto(`/`);
-  await page.fill(`input[type="url"][name="url"]`, `http://localhost${path}`);
-  await Promise.all([
-    page.waitForURL(WRAPPED_URL_RE),
-    page.locator(`form[action="/"] button[type="submit"]`).first().click(),
-  ]);
-}
 
 test.describe(`brightnovels.com fixture`, () => {
   // mirror-page.ts saves /series/sigrid/1 (no extension) as .../1/index.html
@@ -34,21 +30,17 @@ test.describe(`brightnovels.com fixture`, () => {
   });
 
   test(`fixture page loads through proxy`, async ({ page }) => {
-    await createSession(page, FIXTURE_PATH);
+    await createSession(page, `http://localhost${FIXTURE_PATH}`, WRAPPED_URL_RE);
     expect(page.url()).toMatch(WRAPPED_URL_RE);
   });
 
   test(`header bar is injected into fixture page`, async ({ page }) => {
-    await createSession(page, FIXTURE_PATH);
-    await expect(page.locator(`text=Session:`)).toBeVisible();
-    await expect(page.locator(`input[placeholder="New URL"]`)).toBeVisible();
+    await createSession(page, `http://localhost${FIXTURE_PATH}`, WRAPPED_URL_RE);
+    await assertHeaderPresent(page);
   });
 
   test(`Inertia data-page bootstrap URL is rewritten to wrapped subdomain`, async ({ page }) => {
-    // Inertia bootstraps with a JSON blob in data-page on #app.
-    // The proxy must rewrite domain refs there so Inertia routes its XHR
-    // requests through the proxy subdomain instead of the raw origin.
-    await createSession(page, FIXTURE_PATH);
+    await createSession(page, `http://localhost${FIXTURE_PATH}`, WRAPPED_URL_RE);
     const datePage = await page.locator(`#app`).getAttribute(`data-page`);
     expect(datePage).toBeTruthy();
     // The .local.html has brightnovels.com replaced with 'localhost';
