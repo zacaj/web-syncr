@@ -22,6 +22,10 @@ const BRIGHTNOVELS_WRAPPED_RE = new RegExp(
   `^https://[a-z0-9]+__brightnovels_com__\\.localhost:${TEST_PORT}/`,
 );
 
+const FOXAHOLIC_WRAPPED_RE = new RegExp(
+  `^https://[a-z0-9]+__www_foxaholic_com__\\.localhost:${TEST_PORT}/`,
+);
+
 async function switchToMagicurl(page: Page): Promise<void> {
   const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
   if (!sessionId) throw new Error(`Could not extract sessionId from URL: ${page.url()}`);
@@ -58,6 +62,37 @@ test.describe(`Live site regression tests`, () => {
     // At least some links were rewritten into the wrapped subdomain form
     const wrappedLinks = await page.locator(`a[href*="__.localhost:${TEST_PORT}"]`).count();
     expect(wrappedLinks).toBeGreaterThan(0);
+
+    expect(page.innerHTML).toContain(`You're always going on about luxury and whatnot`);
+  });
+
+  test.skip(`foxaholic.com chapter loads via magicurl with header and rewritten links`, async ({ page }) => {
+    test.skip(!MAGICURL, `opt-in: run with LIVE_MAGICURL=<url>`);
+    test.setTimeout(60_000);
+
+    await page.goto(`/`);
+    await page.fill(`input[type="url"][name="url"]`, `https://www.foxaholic.com/novel/transmigrating-to-become-the-bosss-little-fairy/chapter-1/`);
+    await Promise.all([
+      page.waitForURL(FOXAHOLIC_WRAPPED_RE),
+      page.locator(`form[action="/"] button[type="submit"]`).first().click(),
+    ]);
+
+    await switchToMagicurl(page);
+
+    expect(page.url()).toMatch(FOXAHOLIC_WRAPPED_RE);
+
+    // Header bar injected
+    await expect(page.locator(`input[placeholder="New URL"]`)).toBeVisible();
+
+    // No raw foxaholic.com hrefs should remain
+    const rawLinks = await page.locator(`a[href*="foxaholic.com"]`).count();
+    expect(rawLinks).toBe(0);
+
+    // At least some links were rewritten into the wrapped subdomain form
+    const wrappedLinks = await page.locator(`a[href*="__.localhost:${TEST_PORT}"]`).count();
+    expect(wrappedLinks).toBeGreaterThan(0);
+
+    expect(page.innerHTML).toContain(`nonymous group also said that Ji Rang and a gro`);
   });
 
   test(`brightnovels.com Next button navigates without showing an Inertia modal`, async ({ page }) => {
@@ -103,5 +138,7 @@ test.describe(`Live site regression tests`, () => {
     const saved = candidates.map(p => existsSync(p) ? readFileSync(p, `utf8`) : null).find(Boolean);
     expect(saved, `chapter 2 HTML file should exist and be non-empty`).toBeTruthy();
     expect(saved!.length).toBeGreaterThan(500);
+
+    expect(page.innerHTML).toContain(`1500 kerb per month`);
   });
 });

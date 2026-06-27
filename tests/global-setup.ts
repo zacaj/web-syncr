@@ -31,6 +31,12 @@ export const MOCK_PAGES: Record<string, { title: string; html: string }> = {
       <a id="abs" href="http://localhost/page2">absolute link</a>
     </body></html>`,
   },
+  '/with-csp': {
+    title: `With CSP`,
+    html: `<html><head><meta http-equiv="Content-Security-Policy" content="script-src-attr 'none'"><title>With CSP</title></head><body>
+      <h1>CSP Page</h1>
+    </body></html>`,
+  },
 };
 
 function readDotEnv(path: string): Record<string, string> {

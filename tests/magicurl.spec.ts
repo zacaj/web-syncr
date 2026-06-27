@@ -158,6 +158,28 @@ test(`mode select in header shows magicurl option`, async ({ page }) => {
   expect(values).toContain(`magicurl`);
 });
 
+test(`selecting magicurl from dropdown posts to __session-mode and reloads`, async ({ page }) => {
+  await createMagicurlSession(page);
+  const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
+  expect(sessionId).toBeTruthy();
+
+  // Select magicurl from the dropdown (the actual user interaction)
+  const select = page.locator(`select`);
+  await expect(select).toBeVisible();
+  await select.selectOption(`magicurl`);
+
+  // The handler posts to __session-mode then reloads — wait for navigation
+  await page.waitForLoadState(`load`);
+
+  // Verify the config file was written with mode: magicurl
+  const configPath = join(DB_TEST_PATH, `session_${sessionId}.config.json`);
+  const config = JSON.parse(readFileSync(configPath, `utf8`)) as { mode: string };
+  expect(config.mode).toBe(`magicurl`);
+
+  // After reload, the dropdown should still show magicurl
+  await expect(page.locator(`select`)).toHaveValue(`magicurl`);
+});
+
 // ── Mode persistence ────────────────────────────────────────────────────────
 
 test(`default mode is proxy for new sessions`, async ({ page }) => {

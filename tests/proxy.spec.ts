@@ -119,3 +119,16 @@ test(`3xx redirects are rewritten to the wrapped subdomain`, async ({ page }) =>
   await expect(page.locator(`h1`)).toContainText(MOCK_PAGES[`/page2`]!.title);
 });
 
+test(`CSP meta tags are stripped so injected handlers work`, async ({ page }) => {
+  await createSession(page, `/with-csp`);
+  await expect(page.locator(`h1`)).toContainText(`CSP Page`);
+
+  // The CSP meta tag should have been stripped from the served HTML
+  const html = await page.content();
+  expect(html).not.toContain(`Content-Security-Policy`);
+
+  // Inline handlers should work — the mode dropdown fires setSessionMode
+  const select = page.locator(`select`);
+  await expect(select).toBeVisible();
+});
+

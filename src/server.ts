@@ -357,8 +357,23 @@ server.all(`*`, async (c) => {
       }
     }
     catch (err) {
-      // Magicurl API unreachable or error — fall through to proxy
-      console.warn(`MAGICURL ERROR: ${(err as Error).message ?? String(err)} — falling back to live proxy`);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (isPage) {
+        console.error(`MAGICURL ERROR (page): ${msg}`);
+        const errorHtml = `<html><head><title>Magicurl Error</title></head><body>`
+          + `<h1>Magicurl failed to load this page</h1>`
+          + `<pre>${msg.replace(/</g, `&lt;`)}</pre>`
+          + `<p>The page could not be rendered through magicurl. `
+          + `You can switch back to proxy mode or try reloading.</p>`
+          + `</body></html>`;
+        const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
+        const errorBody = await injectHeaderAndScript(errorHtml, { ...session, sessionId }, sessions, injectedJs, mode);
+        const responseHeaders = new Headers();
+        responseHeaders.set(`content-type`, `text/html; charset=utf-8`);
+        responseHeaders.set(`x-load-mode`, `magicurl`);
+        return new Response(errorBody, { status: 502, headers: responseHeaders });
+      }
+      console.warn(`MAGICURL ERROR (asset): ${msg} — falling back to live proxy`);
     }
   }
 

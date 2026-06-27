@@ -60,7 +60,7 @@ export function Header({ session, history, mode }: {
     <select
       value={mode}
       data-sid={session.sessionId}
-      onChange={`e => setSessionMode(this.dataset.sid, e.target.value)` as Hack}
+      onChange={`setSessionMode(this.dataset.sid, this.value)` as Hack}
     >
       <option value="proxy">proxy</option>
       <option value="magicurl">magicurl</option>

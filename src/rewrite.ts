@@ -26,6 +26,9 @@ export async function injectHeaderAndScript(
   mode: LoadMode = `proxy`,
 ): Promise<string> {
   const headerHtml = await renderToStringAsync(Header({ session, history, mode }));
+  // Strip CSP meta tags — the response headers are already stripped, but inline
+  // <meta http-equiv="Content-Security-Policy"> would still block our injected handlers.
+  body = body.replace(/<meta[^>]+http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi, ``);
   body = body.replace(/(<\s*body[^>]*>)/i, `$1<script>${injectedJs}</script>` + headerHtml + `<div id="web-syncr-spacer" style="height:2rem"></div>`);
   return body;
 }
