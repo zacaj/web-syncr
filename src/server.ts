@@ -57,7 +57,7 @@ iframe{flex:1;border:none;width:100%;display:block}
   <code title="${safeUrl}">${safeUrl}</code>
   <span class="hint">Solve in the browser below, then click Done.</span>
   <span id="poll-status">Auto-checking in 20s…</span>
-  <button id="done-btn" onclick="location.reload()">Done — Check Now</button>
+  <button id="done-btn" onclick="poll()">Done — Check Now</button>
 </div>
 <iframe src="${vncLink.replace(/"/g, `&quot;`)}"></iframe>
 <script>
@@ -232,7 +232,7 @@ server.get(`/__poll-challenge`, async c => {
   const url = c.req.query(`url`);
   if (!sessionId || !url) return c.json({ error: `missing params` }, 400);
   try {
-    const result = await renderPage(sessionId, url, { force: true });
+    const result = await renderPage(sessionId, url, { force: false });
     return c.json({ pending: result.challengePending ?? false });
   } catch (err) {
     console.warn(`Error while polling for challenge update on sessionId=${sessionId}: `, err);

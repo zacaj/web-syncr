@@ -235,11 +235,9 @@ export async function renderPage(
   });
   console.info(`[${ts()}] magicurl render done: [${webSessionId}] status=${result.status} fetchId=${result.fetchId} challenge=${result.challengePending ?? false}`);
 
-  // Don't cache a pending challenge as the last successful fetch — the next
-  // navigation should trigger a fresh render, not replay the interstitial.
-  if (!result.challengePending) {
-    writeSessionConfig(webSessionId, { ...cfg, lastFetchId: result.fetchId, _lastUrl: realUrl });
-  }
+  // Always write lastFetchId so the challenge poll (force: false) can reuse it
+  // without triggering another render.
+  writeSessionConfig(webSessionId, { ...cfg, lastFetchId: result.fetchId, _lastUrl: realUrl });
   return result;
 }
 
