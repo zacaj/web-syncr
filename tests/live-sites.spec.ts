@@ -18,6 +18,7 @@ import {
   TEST_PORT,
   assertHeaderPresent,
   assertPageContent,
+  checkForChallenge,
   createSession,
 } from './global-setup';
 
@@ -45,18 +46,28 @@ interface NavigationTest {
 interface LiveSiteTest {
   name: string;
   url: string;
-  /** Wrapped URL pattern matcher (e.g., `__brightnovels_com__.localhost`) */
-  wrappedUrlPattern: RegExp | string;
+  /** Wrapped URL pattern matcher. Defaults to the hostname with dots→underscores (e.g. `www.zacaj.com` → `__www_zacaj_com__`). Override when the site redirects to a different hostname. */
+  wrappedUrlPattern?: RegExp | string;
   /** Required: content that should appear on the initial load */
   expectedContent: string;
   /** Optional: only run in magicurl mode */
   magicurlOnly?: boolean;
   /** Optional: only run in proxy mode */
   proxyOnly?: boolean;
-  /** Optional: always skip this test (not yet working) */
-  skip?: boolean;
+  /** Optional: expected to fail due to a magicurl challenge (e.g. Cloudflare managed challenge).
+   * When set, the test passes if a challenge IS detected, and fails if it's not (meaning magicurl
+   * finally solved it — a happy outcome, but we want the test to fail so the issue can be closed). */
+  expectedChallengeFailure?: boolean;
   /** Optional: additional tests for in-page navigation */
   navigations?: NavigationTest[];
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Mirrors the dot→underscore encoding used by realUrlToWrapped in src/urls.ts */
+function deriveWrappedPattern(url: string): string {
+  const host = new URL(url).host;
+  return `__${host.replaceAll(/([^.])\.([^.])/g, `$1_$2`)}__`;
 }
 
 // ── Session helpers ─────────────────────────────────────────────────────────
@@ -75,21 +86,29 @@ async function createLiveSession(
     : wrappedPattern;
   await createSession(page, url, wrappedRe);
   // For JS-heavy SPA sites, wait for content before asserting header
-  await page.waitForLoadState(`networkidle`);
+  await page.waitForLoadState(`domcontentloaded`);
   await assertHeaderPresent(page);
 }
 
 /**
- * Switch the current session to magicurl mode and verify the header.
+ * Switch the current session to magicurl mode and verify the load mode header.
+ * @returns The reload response (for use by checkForChallenge).
  */
-async function switchToMagicurl(page: Page): Promise<void> {
+async function switchToMagicurl(page: Page): Promise<any> {
   const sessionId = page.url().match(/^https:\/\/([a-z0-9]+)__/)?.[1];
   if (!sessionId) throw new Error(`Could not extract sessionId from URL: ${page.url()}`);
-  await page.request.post(`https://localhost:${TEST_PORT}/__session-mode`, {
+  const modeResp = await page.request.post(`https://localhost:${TEST_PORT}/__session-mode`, {
     data: { sessionId, mode: `magicurl` },
   });
-  const resp = await page.reload({ waitUntil: `domcontentloaded` });
-  expect(await resp?.headerValue(`x-load-mode`)).toBe(`magicurl`);
+  expect(modeResp.status(), `POST /__session-mode returned ${modeResp.status()} for sessionId=${sessionId} — session may not exist yet`).toBe(200);
+
+  // The reload triggers the server-side magicurl render, which blocks until the
+  // headless browser finishes (including waiting out any bot-challenge), so allow
+  // well past Playwright's default 30s navigation timeout.
+  const resp = await page.reload({ waitUntil: `domcontentloaded`, timeout: 60_000 });
+  expect(await resp?.headerValue(`x-load-mode`), `reload after mode switch was not served by magicurl — check server logs for renderPage errors`).toBe(`magicurl`);
+  await expect(page.locator(`select[data-sid]`), `mode dropdown still shows proxy after mode switch — Header may have been rendered with wrong mode`).toHaveValue(`magicurl`);
+  return resp;
 }
 
 /**
@@ -116,7 +135,6 @@ const sites: LiveSiteTest[] = [
   {
     name: `brightnovels.com/series/sigrid/1 loads with header and rewritten links`,
     url: `https://brightnovels.com/series/sigrid/1`,
-    wrappedUrlPattern: `__brightnovels_com__`,
     expectedContent: `You're always going on about luxury and whatnot`,
     navigations: [
       {
@@ -141,16 +159,8 @@ const sites: LiveSiteTest[] = [
     ],
   },
   {
-    name: `foxaholic.com chapter loads via magicurl with header and rewritten links`,
-    url: `https://www.foxaholic.com/novel/transmigrating-to-become-the-bosss-little-fairy/chapter-1/`,
-    wrappedUrlPattern: `__www_foxaholic_com__`,
-    expectedContent: `nonymous group also said that Ji Rang and a gro`,
-    magicurlOnly: true,
-  },
-  {
     name: `git.zacaj.com loads with header and allows navigation to explore`,
     url: `https://git.zacaj.com/`,
-    wrappedUrlPattern: `__git_zacaj_com__`,
     expectedContent: `A painless, self-hosted Git service`,
     navigations: [
       {
@@ -174,6 +184,20 @@ const sites: LiveSiteTest[] = [
       },
     ],
   },
+  {
+    name: `www.zacaj.com chapter via magicurl`,
+    url: `https://www.zacaj.com/about.php`,
+    expectedContent: `ome Facts About Me`,
+    magicurlOnly: true,
+    // expectedChallengeFailure: true,
+  },
+  {
+    name: `foxaholic.com chapter via magicurl`,
+    url: `https://www.foxaholic.com/novel/transmigrating-to-become-the-bosss-little-fairy/chapter-1/`,
+    expectedContent: `nonymous group also said that Ji Rang and a gro`,
+    magicurlOnly: true,
+    expectedChallengeFailure: true,
+  },
 ];
 
 // ── Test runners ────────────────────────────────────────────────────────────
@@ -183,12 +207,38 @@ const sites: LiveSiteTest[] = [
  * and optionally run navigation sub-tests.
  */
 async function runLiveSiteTest(page: Page, site: LiveSiteTest): Promise<void> {
-  const wrappedPattern = typeof site.wrappedUrlPattern === `string`
-    ? new RegExp(site.wrappedUrlPattern)
-    : site.wrappedUrlPattern;
+  const rawPattern = site.wrappedUrlPattern ?? deriveWrappedPattern(site.url);
+  const wrappedPattern = typeof rawPattern === `string` ? new RegExp(rawPattern) : rawPattern;
 
   await createLiveSession(page, site.url, wrappedPattern);
-  if (MAGICURL) await switchToMagicurl(page);
+
+  // Check for Cloudflare/bot-challenge interstitial. This applies to both magicurl and
+  // regular proxy — a direct proxy can also hit a Cloudflare challenge.
+  let magicurlResp: any;
+  if (MAGICURL) {
+    magicurlResp = await switchToMagicurl(page);
+  }
+  const challengeDetected = await checkForChallenge(page, magicurlResp, site.url);
+
+  // Handle expected / unexpected challenges.
+  if (challengeDetected) {
+    if (site.expectedChallengeFailure) {
+      // Challenge was detected as expected; nothing more to verify.
+      return;
+    }
+    throw new Error(
+      `Unexpected Cloudflare challenge for ${site.url} — the test expects the page to resolve cleanly.`,
+    );
+  }
+
+  else {
+    if (site.expectedChallengeFailure) {
+      throw new Error(
+        `Expected magicurl challenge for ${site.url} but none was received. `
+      + `This means the underlying challenge was bypassed — verify and close the tracking issue.`,
+      );
+    }
+  }
 
   // Verify URL matches wrapped pattern
   expect(page.url()).toMatch(wrappedPattern);
@@ -269,17 +319,18 @@ test.describe(`Live site regression tests`, () => {
   for (const site of sites) {
     const shouldRun =
       LIVE &&
-      !site.skip &&
       !(site.magicurlOnly && !MAGICURL) &&
       !(site.proxyOnly && MAGICURL);
     const skip = !shouldRun;
 
     const testName = site.navigations
       ? site.name
-      : `${site.name} [${MAGICURL ? `magicurl` : `proxy`}]`;
+      : `${site.name} [${site.magicurlOnly ? `magicurl` : site.proxyOnly ? `proxy` : MAGICURL ? `magicurl` : `proxy`}]`;
+    // magicurl renders through a real browser and may wait out a bot-challenge
+    // (up to env.magicurlTimeoutMs, ~30s), so give those runs a wide budget.
     const timeout = site.navigations
-      ? MAGICURL ? 30_000 : 15_000
-      : MAGICURL ? 20_000 : 10_000;
+      ? MAGICURL ? 90_000 : 15_000
+      : MAGICURL ? 60_000 : 10_000;
 
     test(testName, async ({ page }) => {
       test.skip(skip, `opt-in: run with LIVE_TESTS=1 or LIVE_MAGICURL=<url>`);

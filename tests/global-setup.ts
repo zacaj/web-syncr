@@ -86,6 +86,60 @@ export async function assertPageContent(page: Page, text: string, timeout?: numb
   await expect(page.locator(`body`)).toContainText(text, timeout ? { timeout } : undefined);
 }
 
+/**
+ * Detect whether the page is a Cloudflare (or other) bot-challenge interstitial.
+ *
+ * Checks:
+ *   1. `x-magicurl-challenge` header on the magicurl response (server-side signal)
+ *   2. Page HTML for Cloudflare challenge indicators (page-level signal)
+ *
+ * @returns true if a challenge was detected.
+ */
+export async function checkForChallenge(
+  page: Page,
+  response: any,
+  siteUrl: string,
+): Promise<boolean> {
+  const html = await page.content();
+
+  // 1. Check the magicurl challenge header
+  const headers = response?.headers ?? response;
+  const challenge = headers?.['x-magicurl-challenge'] ?? headers?.get?.('x-magicurl-challenge');
+  if (challenge) {
+    const status = typeof response?.status === 'function' ? response.status() : response?.status;
+    console.warn(
+      `magicurl hit a ${challenge} challenge for ${siteUrl} — `
+      + `the page was an unresolvable bot-challenge interstitial (HTTP ${status}). `
+      + `This usually means an interactive captcha or an egress IP the site hard-challenges.`,
+    );
+    return true;
+  }
+
+  // 2. Check the page HTML for Cloudflare challenge indicators.
+  // Use specific patterns only — avoid broad terms like /Cloudflare/i that match
+  // legitimate pages that mention Cloudflare in footer/content.
+  const cloudflarePatterns = [
+    /<title>[^<]*just a moment/i,          // classic CF challenge title
+    /challenges\.cloudflare\.com/i,         // CF challenge CDN script
+    /cf_chl_opt/i,                          // CF challenge JS config object
+    /cf_chl_f_tk/i,                         // CF challenge token field
+    /cf-mitigated/i,                        // CF mitigation meta/header
+    /var cf\.challenge/i,                   // older CF challenge JS
+  ];
+
+  for (const pattern of cloudflarePatterns) {
+    if (html.match(pattern)) {
+      console.warn(
+        `Detected Cloudflare challenge on ${siteUrl} — the page appears to be a bot-challenge interstitial. `
+        + `Check that the site is reachable and that egress IPs are not flagged.`,
+      );
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function readDotEnv(path: string): Record<string, string> {
   try {
     return Object.fromEntries(

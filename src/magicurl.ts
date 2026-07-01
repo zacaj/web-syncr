@@ -32,6 +32,16 @@ export type Asset = {
   bytes: number;
 };
 
+export type CfTokenReuse = {
+  initialStatus: `token_wrong_ip` | `token_expired` | `no_token` | `token_valid`;
+  targetServer?: string;
+  boundIp?: string;
+  rotated: boolean;
+  skipReason?: `opt_out` | `no_mapping` | `server_unavailable` | `rotation_failed` | `not_cf_protected`;
+  finalStatus: `token_worked` | `token_failed` | `token_expired` | `no_token`;
+  rotationDurationMs?: number;
+};
+
 export type FetchResult = {
   fetchId: string;
   sessionId: string;
@@ -42,6 +52,15 @@ export type FetchResult = {
   finishedAt: string;
   durationMs: number;
   egressIp?: string;
+  cfTokenStatus?: string;
+  cfTokenReuse?: CfTokenReuse;
+
+  /** True when the fetch returned early because a bot-challenge needs manual resolution. */
+  challengePending?: boolean;
+  /** Challenge vendor name, e.g. "cloudflare". Present when challengePending is true. */
+  challengeName?: string;
+  /** noVNC link to the live browser. Present when challengePending is true. */
+  vnc?: string;
 
   request: {
     extraHeaders: Record<string, string>;
@@ -55,6 +74,8 @@ export type FetchResult = {
   dom: { path: string; bytes: number };
   assets: Asset[];
   console?: Array<{ type: string; text: string }>;
+  /** Soft-timeout notices, e.g. "waitUntil 'domcontentloaded' timed out; page captured as-is" */
+  warnings?: string[];
   bundlePath: string;
 };
 
@@ -64,6 +85,9 @@ export type SessionMeta = {
   createdAt: string;
   lastUsedAt: string;
   currentUrl?: string;
+  headless?: boolean;
+  cfTokenIp?: string;
+  cfTokenExpires?: number;
 };
 
 /** Extended session config that stores both load mode and magicurl session ID */
@@ -95,22 +119,74 @@ function writeSessionConfig(sessionId: string, cfg: SessionConfig): void {
 
 // ── Magicurl REST client ────────────────────────────────────────────────────
 
-const API = env.magicurlApi || `http://localhost:3005`;
+const API = env.magicurlApi || `http://100.111.42.92:3005`;
+
+const ts = () => new Date().toISOString().replace(`T`, ` `).slice(0, 23);
+
+function networkCause(err: unknown): string {
+  if (!(err instanceof Error)) return ``;
+  const cause = (err as NodeJS.ErrnoException & { cause?: unknown }).cause;
+  if (!cause) return ``;
+  if (cause instanceof Error) return cause.message;
+  try {
+    return JSON.stringify(cause) ?? `[unstringifiable cause]`;
+  } catch {
+    return `[unstringifiable cause]`;
+  }
+}
 
 async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API}${path}`);
-  if (!res.ok) throw new Error(`magicurl GET ${path}: ${res.status} ${res.statusText}`);
+  const url = `${API}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    const cause = networkCause(err);
+    throw new Error(`magicurl GET ${url}: network error${cause ? ` — ${cause}` : ``}`, { cause: err instanceof Error ? err : undefined });
+  }
+  if (!res.ok) throw new Error(`magicurl GET ${url}: ${res.status} ${res.statusText}`);
   return res.json() as T;
 }
 
 async function apiPost<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
-    method: `POST`,
-    headers: { 'Content-Type': `application/json` },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`magicurl POST ${path}: ${res.status} ${res.statusText}`);
+  const url = `${API}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: `POST`,
+      headers: { 'Content-Type': `application/json` },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    const cause = networkCause(err);
+    throw new MagicurlError(`magicurl POST ${url}: network error${cause ? ` — ${cause}` : ``}`, cause);
+  }
+  if (!res.ok) {
+    // Include the response body — magicurl returns a JSON `{ error }` with the
+    // real failure (e.g. "page.waitForFunction: Timeout …" for an unresolved
+    // bot-challenge), which is otherwise lost behind the bare status line.
+    const detail = await res.text().catch(() => ``);
+    throw new MagicurlError(`magicurl POST ${url}: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ``}`, detail);
+  }
   return res.json() as T;
+}
+
+/** Error from a magicurl API call. `detail` carries the raw response body. */
+export class MagicurlError extends Error {
+  constructor(message: string, public readonly detail: string = ``) {
+    super(message);
+    this.name = `MagicurlError`;
+  }
+}
+
+/**
+ * Heuristic: does this error (from a failed fetch) indicate magicurl gave up on
+ * an unresolved bot-challenge? camoufetch's challenge resolver throws a
+ * `page.waitForFunction: Timeout …` once it can't clear the interstitial.
+ */
+export function isChallengeTimeout(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /waitforfunction:\s*timeout/i.test(msg);
 }
 
 // ── Core functions ──────────────────────────────────────────────────────────
@@ -149,18 +225,49 @@ export async function renderPage(
     return cached;
   }
 
-  // Issue a new fetch
+  const timeoutMs = Number(env.magicurlTimeoutMs) || 30000;
+  console.info(`[${ts()}] magicurl render: [${webSessionId}] magic=${magicSessionId} url=${realUrl} timeout=${timeoutMs}ms`);
   const result = await apiPost<FetchResult>(`/sessions/${magicSessionId}/fetch`, {
     url: realUrl,
-    wait: { until: `domcontentloaded` as const, timeoutMs: 3000, settleMs: 500 },
+    wait: { until: `domcontentloaded` as const, timeoutMs, settleMs: 500 },
     captureAssets: true,
     rotateOnBlock: true,
   });
+  console.info(`[${ts()}] magicurl render done: [${webSessionId}] status=${result.status} fetchId=${result.fetchId} challenge=${result.challengePending ?? false}`);
 
-  // Cache the fetchId for potential reuse
-  const updated = { ...cfg, lastFetchId: result.fetchId, _lastUrl: realUrl };
-  writeSessionConfig(webSessionId, updated);
+  // Don't cache a pending challenge as the last successful fetch — the next
+  // navigation should trigger a fresh render, not replay the interstitial.
+  if (!result.challengePending) {
+    writeSessionConfig(webSessionId, { ...cfg, lastFetchId: result.fetchId, _lastUrl: realUrl });
+  }
   return result;
+}
+
+/**
+ * Detect whether a rendered result is still showing a bot-challenge interstitial
+ * (i.e. the challenge did not resolve within the fetch budget). Mirrors the
+ * signals camoufetch's challengeDetector uses, since we only have the DOM + the
+ * navigation status to go on here.
+ *
+ * Returns the challenge vendor name (e.g. "cloudflare") if blocked, else null.
+ */
+export function detectUnresolvedChallenge(result: FetchResult, dom: string): string | null {
+  const head = dom.slice(0, 4000).toLowerCase();
+  const cloudflare =
+    /<title>[^<]*just a moment/i.test(dom)
+    || head.includes(`challenges.cloudflare.com`)
+    || head.includes(`_cf_chl_opt`)
+    || (head.includes(`cf-chl`) && (result.status === 403 || result.status === 503));
+  return cloudflare ? `cloudflare` : null;
+}
+
+/**
+ * The human-in-the-loop VNC entry point on the magicurl service. The `/vnc`
+ * route redirects to the noVNC web client so a human can solve an interactive
+ * captcha in the live browser, after which the fetch can be re-issued.
+ */
+export function vncUrl(): string {
+  return `${API}/vnc`;
 }
 
 /**
@@ -233,13 +340,13 @@ export async function lookupAsset(
   const fetchId = cfg.lastFetchId;
   if (!fetchId) return null;
 
-  // Check cache first
-  const sessionKey = webSessionId;
-  let urlMap = manifestCache.get(sessionKey);
+  // Check cache first — keyed by fetchId so stale maps are never reused after re-renders
+  const cacheKey = `${webSessionId}:${fetchId}`;
+  let urlMap = manifestCache.get(cacheKey);
   if (!urlMap) {
     const result = await loadManifest(fetchId);
     urlMap = buildUrlMap(result);
-    manifestCache.set(sessionKey, urlMap);
+    manifestCache.set(cacheKey, urlMap);
   }
 
   // Try exact match
@@ -250,6 +357,16 @@ export async function lookupAsset(
   const normalized = realUrl.replace(/\/$/, ``);
   const hit2 = urlMap.get(normalized);
   if (hit2) return hit2;
+
+  // Try toggling www. prefix — the session may be under zacaj.com while the
+  // manifest recorded assets as www.zacaj.com (or vice versa)
+  try {
+    const u = new URL(realUrl);
+    const altHost = u.hostname.startsWith(`www.`) ? u.hostname.slice(4) : `www.${u.hostname}`;
+    u.hostname = altHost;
+    const hit3 = urlMap.get(u.toString());
+    if (hit3) return hit3;
+  } catch { /* invalid URL — skip */ }
 
   return null;
 }
@@ -280,7 +397,8 @@ export function streamAsset(absPath: string): {
         },
       });
     return { stream, mimeType, contentLength: st.size };
-  } catch {
+  } catch (err) {
+    console.error(`Error loading asset at ${absPath}: `, err);
     return null;
   }
 }
