@@ -9,6 +9,7 @@ export const PID_FILE = `/tmp/web-syncr-test-server.pid`;
 export const DB_TEST_PATH = `/tmp/web-syncr-test-db`;
 export const TEST_PORT = 29443;
 export const MOCK_PORT = 38080;
+export const MOCK_MAGICURL_PORT = 38081;
 
 export const MOCK_PAGES: Record<string, { title: string; html: string }> = {
   '/': {
@@ -209,6 +210,47 @@ export default async function globalSetup() {
   await new Promise<void>(r => mockServer.listen(MOCK_PORT, r));
   (globalThis as Record<string, unknown>).__mockServer = mockServer;
 
+  // Mock magicurl API — returns challenge responses for testing challenge page rendering
+  const MOCK_MAGICURL_FETCH_ID = `challenge_fetch`;
+  const MOCK_MAGIC_SESSION_ID = `magic-challenge`;
+  const mockMagicUrlServer = http.createServer((req, res) => {
+    const url = new URL(req.url!, `http://localhost`);
+
+    // POST /sessions — create a magicurl session
+    if (url.pathname === `/sessions` && req.method === `POST`) {
+      res.writeHead(200, { 'Content-Type': `application/json` });
+      res.end(JSON.stringify({ sessionId: MOCK_MAGIC_SESSION_ID }));
+      return;
+    }
+
+    // POST /sessions/:id/fetch — trigger a fetch, return challenge result
+    if (url.pathname === `/sessions/${MOCK_MAGIC_SESSION_ID}/fetch` && req.method === `POST`) {
+      res.writeHead(200, { 'Content-Type': `application/json` });
+      res.end(JSON.stringify({
+        fetchId: MOCK_MAGICURL_FETCH_ID,
+        sessionId: MOCK_MAGIC_SESSION_ID,
+        requestedUrl: `http://localhost/page2`,
+        finalUrl: `http://localhost/page2`,
+        status: 200,
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        durationMs: 5000,
+        challengePending: true,
+        challengeName: `cloudflare`,
+        vnc: `vnc.html?token=abc123`,
+        dom: { path: `dom.html`, bytes: 0 },
+        assets: [],
+        bundlePath: `/data/fetches/${MOCK_MAGICURL_FETCH_ID}`,
+      }));
+      return;
+    }
+
+    res.writeHead(404, { 'Content-Type': `application/json` });
+    res.end(JSON.stringify({ error: `not found` }));
+  });
+  await new Promise<void>(r => mockMagicUrlServer.listen(MOCK_MAGICURL_PORT, r));
+  (globalThis as Record<string, unknown>).__mockMagicUrlServer = mockMagicUrlServer;
+
   // Start the web-syncr server with test config
   const baseEnv = readDotEnv(`./.env`);
   const magicurlUrl = process.env.LIVE_MAGICURL;
@@ -222,6 +264,7 @@ export default async function globalSetup() {
     ...(!isLive ? { proxyPort: String(MOCK_PORT), proxyProtocol: `http` } : {}),
     dbPath: DB_TEST_PATH,
     ...(magicurlUrl && magicurlUrl !== `1` ? { magicurlApi: magicurlUrl } : {}),
+    ...(!isLive ? { magicurlApi: `http://localhost:${MOCK_MAGICURL_PORT}` } : {}),
   };
 
   const proc = spawn(`node_modules/.bin/tsx`, [`src/server`], {

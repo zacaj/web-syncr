@@ -12,6 +12,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
 import * as Path from 'node:path';
 import { renderToStringAsync } from "preact-render-to-string";
+import { ChallengePage } from "./ChallengePage";
 import { env, sessionConfigPath as sessionConfigPathFn, type LoadMode, type Session, type SessionHead } from "./config";
 import { Home } from "./Home";
 import { detectUnresolvedChallenge, getDomHtml, isChallengeTimeout, lookupAsset, renderPage, streamAsset, vncUrl } from './magicurl';
@@ -32,55 +33,6 @@ function getSessionMode(sessionId: string): LoadMode {
     catch { return `proxy` }
   }
   return `proxy`;
-}
-
-/** Build the HTML for the challenge-pending waiting page. Injected JS handles auto-polling. */
-function buildChallengePage(challengeName: string, realUrl: string, sessionId: string, vncLink: string): string {
-  const safeUrl = realUrl.replace(/</g, `&lt;`);
-  const safeChallenge = challengeName.replace(/</g, `&lt;`);
-  const jsSessionId = JSON.stringify(sessionId);
-  const jsRealUrl = JSON.stringify(realUrl);
-  return `<html><head><title>Challenge pending — ${safeChallenge}</title><style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,sans-serif;background:#0f0f14;color:#e0e0e0;display:flex;flex-direction:column;height:100vh;overflow:hidden}
-#challenge-bar{padding:10px 16px;background:#1a1a2e;border-bottom:2px solid #e94560;display:flex;align-items:center;gap:12px;flex-shrink:0}
-#challenge-bar h2{font-size:14px;color:#e94560;white-space:nowrap}
-#challenge-bar code{font-size:12px;color:#aaa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40vw}
-#challenge-bar .hint{font-size:12px;color:#888;flex:1}
-#done-btn{padding:7px 14px;background:#e94560;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;white-space:nowrap}
-#done-btn:hover{background:#c73350}
-#poll-status{font-size:12px;color:#888;white-space:nowrap}
-iframe{flex:1;border:none;width:100%;display:block}
-</style></head><body>
-<div id="challenge-bar">
-  <h2>${safeChallenge} challenge</h2>
-  <code title="${safeUrl}">${safeUrl}</code>
-  <span class="hint">Solve in the browser below, then click Done.</span>
-  <span id="poll-status">Auto-checking in 20s…</span>
-  <button id="done-btn" onclick="poll()">Done — Check Now</button>
-</div>
-<iframe src="${vncLink.replace(/"/g, `&quot;`)}"></iframe>
-<script>
-var SESSION_ID=${jsSessionId},REAL_URL=${jsRealUrl},countdown=20,timer;
-function tick(){
-  countdown--;
-  var s=document.getElementById('poll-status');
-  if(countdown>0){s.textContent='Auto-checking in '+countdown+'s…';}
-  else{clearInterval(timer);s.textContent='Checking…';poll();}
-}
-async function poll(){
-  try{
-    var r=await fetch('/__poll-challenge?sessionId='+encodeURIComponent(SESSION_ID)+'&url='+encodeURIComponent(REAL_URL));
-    var d=await r.json();
-    if(!d.pending){location.reload();return;}
-  }catch(e){}
-  countdown=20;
-  document.getElementById('poll-status').textContent='Auto-checking in 20s…';
-  timer=setInterval(tick,1000);
-}
-timer=setInterval(tick,1000);
-</script>
-</body></html>`;
 }
 
 const server = new Hono();
@@ -392,7 +344,7 @@ server.all(`*`, async (c) => {
             `MAGICURL CHALLENGE PENDING (${pendingChallenge}): ${realUrl} — returning interactive challenge page`,
           );
           const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
-          const challengeHtml = buildChallengePage(pendingChallenge, realUrl, sessionId, result.vnc ?? vncUrl());
+          const challengeHtml = await renderToStringAsync(ChallengePage({ challengeName: pendingChallenge, realUrl, sessionId, vnc: result.vnc ?? vncUrl() }));
           const challengeBody = await injectHeaderAndScript(challengeHtml, { ...session, sessionId }, sessions, injectedJs, mode);
           const responseHeaders = new Headers();
           responseHeaders.set(`content-type`, `text/html; charset=utf-8`);
@@ -411,7 +363,7 @@ server.all(`*`, async (c) => {
             + `warnings=${JSON.stringify(result.warnings ?? [])} — interstitial not resolved`,
           );
           const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
-          const challengeHtml = buildChallengePage(legacyChallenge, realUrl, sessionId, vncUrl());
+          const challengeHtml = await renderToStringAsync(ChallengePage({ challengeName: legacyChallenge, realUrl, sessionId, vnc: vncUrl() }));
           const challengeBody = await injectHeaderAndScript(challengeHtml, { ...session, sessionId }, sessions, injectedJs, mode);
           const responseHeaders = new Headers();
           responseHeaders.set(`content-type`, `text/html; charset=utf-8`);
@@ -487,15 +439,15 @@ server.all(`*`, async (c) => {
           + (causeStr ? `\n  cause: ${causeStr}` : ``),
         );
         const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
-        const pageHtml = challenged
-          ? buildChallengePage(`cloudflare`, realUrl, sessionId, vncUrl())
+        const html = challenged
+          ? await renderToStringAsync(ChallengePage({ challengeName: `cloudflare`, realUrl, sessionId, vnc: vncUrl() }))
           : `<html><head><title>Magicurl Error</title></head><body>`
             + `<h1>Magicurl failed to load this page</h1>`
             + `<pre>${msg.replace(/</g, `&lt;`)}</pre>`
             + `<p>The page could not be rendered through magicurl. `
             + `You can switch back to proxy mode or try reloading.</p>`
             + `</body></html>`;
-        const errorBody = await injectHeaderAndScript(pageHtml, { ...session, sessionId }, sessions, injectedJs, mode);
+        const errorBody = await injectHeaderAndScript(html, { ...session, sessionId }, sessions, injectedJs, mode);
         const responseHeaders = new Headers();
         responseHeaders.set(`content-type`, `text/html; charset=utf-8`);
         responseHeaders.set(`x-load-mode`, `magicurl`);
