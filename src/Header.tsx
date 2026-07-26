@@ -48,7 +48,7 @@ export function Header({ session, history, mode }: {
     <button type="button" onClick={`toggleSessions()` as Hack}>
       {new URL(session.url).pathname}
     </button>
-    <div id="sessions" style={{ position: `absolute`, zIndex: 1000, left: 0, right: 0, bottom: 0, top: `100%`, display: `none` }}>
+    <div id="sessions" style={{ position: `absolute`, zIndex: 1000, left: 0, right: 0, top: `100%`, display: `none` }}>
       <div style={{ display: `flex`, flexDirection: `column`, gap: `1rem`, background: `white` }}>
         {history.map(s => <button type="button"
           data-url={s.url}

@@ -93,7 +93,6 @@ const ignoreProxy: H<BlankEnv> = async (c) => {
 server.get(`/favicon.ico`, ignoreProxy);
 server.get(`/robots.txt`, ignoreProxy);
 server.get(`/.well-known/*`, ignoreProxy);
-server.get(`/**/*.js`, ignoreProxy);
 
 server.use(`*`, poweredBy());
 server.use(`*`, logger((str, ...rest) => console.log(`[${ts()}]`, str, ...rest)));
@@ -285,6 +284,12 @@ server.all(`*`, async (c) => {
           // const newURL = realUrlToWrapped(_session.url, sessionId, publicHost);
           // return c.redirect(newURL);
           session = prevSession;
+        }
+        else if (_session && isRefresh) {
+          // Refreshing a page not in recent history — don't re-add it as the newest entry.
+          // Use a sentinel timestamp so the Latest button appears.
+          console.warn(`Refresh of older session on ${realUrl}`, why);
+          session = { url: realUrl, timestamp: jsonDate(new Date(0)) };
         }
         else {
           console.warn(`Update session ${sessionId} to ${realUrl}`, why);
@@ -509,16 +514,26 @@ server.all(`*`, async (c) => {
   replacements[encodeURIComponent(baseUrl)] ??= encodeURIComponent(`${subdomain}__.${publicHost}`);
   replacements[encodeURI(baseUrl)] ??= encodeURI(`${subdomain}__.${publicHost}`);
 
-  const isHtml = (response.headers.get(`content-type`) ?? ``).includes(`text/html`);
+  const contentType = (response.headers.get(`content-type`) ?? ``).toLowerCase();
+  const isHtml = contentType.includes(`text/html`);
+  const isCss = contentType.includes(`text/css`) || contentType.includes(`css`);
+  const isJs = contentType.includes(`javascript`) || contentType.includes(`application/json`);
+  const isRewritable = isHtml || isCss || isJs;
+
   const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
-  let newBody = replaceAllPatterns(body, replacements) ?? (isHtml ? body : null);
-  if (newBody) {
-    newBody = await injectHeaderAndScript(newBody, { ...session, sessionId: sessionId }, sessions, injectedJs, mode);
-    const responseHeaders = new Headers(response.headers);
-    responseHeaders.delete(`content-security-policy`);
-    responseHeaders.delete(`content-security-policy-report-only`);
-    responseHeaders.delete(`x-frame-options`);
-    return new Response(newBody, { status: response.status, statusText: response.statusText, headers: responseHeaders });
+
+  if (isRewritable) {
+    let newBody = replaceAllPatterns(body, replacements) ?? body;
+    const changed = newBody !== body;
+    if (isHtml || changed) {
+      if (isHtml)
+        newBody = await injectHeaderAndScript(newBody, { ...session, sessionId: sessionId }, sessions, injectedJs, mode);
+      const responseHeaders = new Headers(response.headers);
+      responseHeaders.delete(`content-security-policy`);
+      responseHeaders.delete(`content-security-policy-report-only`);
+      responseHeaders.delete(`x-frame-options`);
+      return new Response(newBody, { status: response.status, statusText: response.statusText, headers: responseHeaders });
+    }
   }
   else
     return originalResponse;
