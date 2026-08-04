@@ -2,7 +2,9 @@
 // @ts-nocheck
 function realUrlToWrapped(realUrl, sessionId, publicHost) {
   const url = new URL(realUrl);
-  const baseUrl = url.host;
+  // hostname (not host) — a port on realUrl is always re-derived server-side from
+  // env.proxyPort, and a colon isn't valid inside a hostname label anyway.
+  const baseUrl = url.hostname;
   const wrappedHost = `${sessionId.toLowerCase()}__${baseUrl.replaceAll(/([^.])\.([^.])/g, `$1_$2`)}__.${publicHost}`;
   return `https://${wrappedHost}${url.pathname}${url.search}${url.hash}`;
 }
@@ -104,3 +106,4 @@ function setSessionMode(sessionId, mode) {
     body: JSON.stringify({ sessionId, mode }),
   }).then(() => location.reload()).catch(() => {});
 }
+

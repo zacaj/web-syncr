@@ -3,9 +3,11 @@ import { appendJsonL, lastJsonLs, readJsonL } from "common/util/files";
 import { jsonDate, zid, type Opaque } from "common/util/index";
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
+import { HTTPException } from 'hono/http-exception';
 import { logger } from 'hono/logger';
 import { poweredBy } from 'hono/powered-by';
 import { proxy } from 'hono/proxy';
+import { timeout } from 'hono/timeout';
 import type { BlankEnv, H } from "hono/types";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -18,6 +20,7 @@ import { Home } from "./Home";
 import { detectUnresolvedChallenge, getDomHtml, isChallengeTimeout, lookupAsset, renderPage, streamAsset, vncUrl } from './magicurl';
 import { injectHeaderAndScript, replaceAllPatterns } from "./rewrite";
 import { parseSubdomain, realUrlToWrapped, wrappedUrlToReal } from "./urls";
+import { startWatchdog } from "./watchdog";
 
 export { realUrlToWrapped };
 export type { Session, SessionHead };
@@ -94,9 +97,24 @@ server.get(`/favicon.ico`, ignoreProxy);
 server.get(`/robots.txt`, ignoreProxy);
 server.get(`/.well-known/*`, ignoreProxy);
 
+// Liveness probe. Wire a container healthcheck at this path so that a wedged
+// event loop (which cannot answer) fails the check and triggers a restart. It is
+// registered before the timeout/proxy middleware so it stays cheap and local.
+server.get(`/__healthz`, c => c.text(`ok`));
+
 server.use(`*`, poweredBy());
 server.use(`*`, logger((str, ...rest) => console.log(`[${ts()}]`, str, ...rest)));
+// Hard per-request deadline. Bounds any *asynchronous* hang (e.g. an upstream or
+// magicurl socket that never finishes) — the request returns 504 instead of
+// holding a connection open forever. A synchronous CPU spin can't be interrupted
+// from the same thread; the watchdog thread covers that case.
+const requestTimeoutMs = Number(env.requestTimeoutMs) || 0;
+if (requestTimeoutMs > 0)
+  server.use(`*`, timeout(requestTimeoutMs));
 server.onError((err, c) => {
+  // Preserve intentional HTTP errors (e.g. the 504 thrown by the timeout
+  // middleware) instead of masking them as a generic 500.
+  if (err instanceof HTTPException) return err.getResponse();
   const traceId = zid(`TR`);
   console.error(`[${ts()}] ${traceId}: ${err}`, err);
   return c.text(`Error loading URL, traceId: ${traceId}\n${err}`, 500);
@@ -522,7 +540,16 @@ server.all(`*`, async (c) => {
 
   const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
 
-  if (isRewritable) {
+  // Guard: never run the (event-loop-blocking) rewrite/inject pass on an absurdly
+  // large body. Degrading to "served untouched, no header bar" is far better than
+  // monopolising the single thread on a multi-megabyte page.
+  const maxRewriteBytes = Number(env.rewriteMaxBytes) || 0;
+  const tooLargeToRewrite = maxRewriteBytes > 0 && body.length > maxRewriteBytes;
+  if (tooLargeToRewrite)
+    console.warn(`[${ts()}] Skipping rewrite for oversized ${contentType || `?`} body `
+      + `(${Math.round(body.length / 1024)}kB > ${Math.round(maxRewriteBytes / 1024)}kB): ${realUrl}`);
+
+  if (isRewritable && !tooLargeToRewrite) {
     let newBody = replaceAllPatterns(body, replacements) ?? body;
     const changed = newBody !== body;
     if (isHtml || changed) {
@@ -535,8 +562,13 @@ server.all(`*`, async (c) => {
       return new Response(newBody, { status: response.status, statusText: response.statusText, headers: responseHeaders });
     }
   }
-  else
-    return originalResponse;
+
+  // Passthrough for everything else: non-rewritable content, a rewritable-but-
+  // unchanged non-HTML asset (e.g. a CSS/JS file with no base-URL occurrences), or
+  // an oversized body. This return is mandatory — falling through without a
+  // Response is what produced Hono's "Context is not finalized" 500s on the
+  // magicurl-miss → live-proxy asset path.
+  return originalResponse;
 });
 
 serve({
@@ -549,4 +581,12 @@ serve({
   },
 }, () => {
   console.log(`Server started on https://${env.publicHost}:${env.publicPort} / https://localhost:${env.localPort}`);
+  // Self-heal a wedged event loop: if a request drives the single thread into a
+  // synchronous spin, a monitor thread hard-kills the process so the supervisor
+  // restarts it. Set watchdogMs=0 to disable (e.g. under a debugger).
+  const watchdogMs = Number(env.watchdogMs) || 0;
+  if (watchdogMs > 0) {
+    startWatchdog({ thresholdMs: watchdogMs });
+    console.log(`Event-loop watchdog armed (threshold ${watchdogMs}ms)`);
+  }
 });

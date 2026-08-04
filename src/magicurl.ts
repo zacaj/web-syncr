@@ -135,11 +135,24 @@ function networkCause(err: unknown): string {
   }
 }
 
+/**
+ * Bounded fetch. Every magicurl HTTP call MUST have a deadline — without one, a
+ * magicurl instance that accepts the socket but never finishes the response body
+ * hangs the awaiting request forever (a request that never returns). `overheadMs`
+ * is added on top of the per-fetch render budget for calls that trigger a render.
+ */
+function fetchWithTimeout(url: string, init: RequestInit & { timeoutMs: number }): Promise<Response> {
+  const { timeoutMs, ...rest } = init;
+  return fetch(url, { ...rest, signal: AbortSignal.timeout(timeoutMs) });
+}
+
+const API_TIMEOUT_MS = 30_000;
+
 async function apiGet<T>(path: string): Promise<T> {
   const url = `${API}${path}`;
   let res: Response;
   try {
-    res = await fetch(url);
+    res = await fetchWithTimeout(url, { timeoutMs: API_TIMEOUT_MS });
   } catch (err) {
     const cause = networkCause(err);
     throw new Error(`magicurl GET ${url}: network error${cause ? ` — ${cause}` : ``}`, { cause: err instanceof Error ? err : undefined });
@@ -148,14 +161,15 @@ async function apiGet<T>(path: string): Promise<T> {
   return res.json() as T;
 }
 
-async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+async function apiPost<T>(path: string, body?: unknown, timeoutMs = API_TIMEOUT_MS): Promise<T> {
   const url = `${API}${path}`;
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetchWithTimeout(url, {
       method: `POST`,
       headers: { 'Content-Type': `application/json` },
       body: body ? JSON.stringify(body) : undefined,
+      timeoutMs,
     });
   } catch (err) {
     const cause = networkCause(err);
@@ -227,12 +241,15 @@ export async function renderPage(
 
   const timeoutMs = Number(env.magicurlTimeoutMs) || 30000;
   console.info(`[${ts()}] magicurl render: [${webSessionId}] magic=${magicSessionId} url=${realUrl} timeout=${timeoutMs}ms`);
+  // The HTTP call itself must outlast magicurl's own render budget, or we'd abort
+  // a render that was about to succeed — but it must still be bounded, so a magicurl
+  // instance that hangs the socket can't hang this request indefinitely.
   const result = await apiPost<FetchResult>(`/sessions/${magicSessionId}/fetch`, {
     url: realUrl,
     wait: { until: `domcontentloaded` as const, timeoutMs, settleMs: 500 },
     captureAssets: true,
     rotateOnBlock: true,
-  });
+  }, timeoutMs + 15_000);
   console.info(`[${ts()}] magicurl render done: [${webSessionId}] status=${result.status} fetchId=${result.fetchId} challenge=${result.challengePending ?? false}`);
 
   // Always write lastFetchId so the challenge poll (force: false) can reuse it
@@ -298,7 +315,7 @@ export async function getDomHtml(fetchId: string): Promise<string> {
     // fall through to API fallback
   }
   // REST API fallback (DOM endpoint returns raw HTML, not JSON)
-  const res = await fetch(`${API}/fetches/${fetchId}/dom`);
+  const res = await fetchWithTimeout(`${API}/fetches/${fetchId}/dom`, { timeoutMs: API_TIMEOUT_MS });
   if (!res.ok) throw new Error(`magicurl GET /fetches/${fetchId}/dom: ${res.status} ${res.statusText}`);
   return await res.text();
 }

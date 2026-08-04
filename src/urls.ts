@@ -23,11 +23,16 @@ export function parseSubdomain(host: string): ParsedSubdomain | null {
 }
 
 export function realUrlToWrapped(realUrl: string, sessionId: string, publicHost: string): URL {
-  const newURL = new URL(realUrl);
-  const baseUrl = new URL(realUrl).host;
-  newURL.protocol = `https:`;
-  newURL.host = `${sessionId.toLowerCase()}__${baseUrl.replaceAll(/([^.])\.([^.])/g, `$1_$2`)}__.${publicHost}`;
-  return newURL;
+  const orig = new URL(realUrl);
+  // Use `hostname` (never `host`) — any port on `realUrl` is discarded by design:
+  // parseSubdomain()/server.ts always re-derive the upstream port from env.proxyPort,
+  // never from the wrapped hostname, and a colon isn't valid inside a hostname label
+  // anyway. Also build the wrapped URL fresh from a string rather than mutating
+  // `.host` on an existing URL — the WHATWG host setter treats embedded colons as a
+  // port separator and silently truncates or throws on the malformed result.
+  const baseUrl = orig.hostname;
+  const wrappedHost = `${sessionId.toLowerCase()}__${baseUrl.replaceAll(/([^.])\.([^.])/g, `$1_$2`)}__.${publicHost}`;
+  return new URL(`https://${wrappedHost}${orig.pathname}${orig.search}${orig.hash}`);
 }
 
 export function wrappedUrlToReal(wrappedUrl: string): string {

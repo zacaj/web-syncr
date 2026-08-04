@@ -39,6 +39,13 @@ export const MOCK_PAGES: Record<string, { title: string; html: string }> = {
       <h1>CSP Page</h1>
     </body></html>`,
   },
+  '/with-special-attrs': {
+    title: `Special Attrs`,
+    html: `<html><head><title>With Special Attrs</title></head><body data-action="click->test" class="test" data-value="a>b">
+      <h1>Page with Special Attrs</h1>
+      <p>Body tag has attributes with special chars like > in values</p>
+    </body></html>`,
+  },
 };
 
 // ── Shared test helpers ──────────────────────────────────────────────────────
@@ -185,6 +192,22 @@ export default async function globalSetup() {
       return;
     }
 
+    // A rewritable (CSS) asset whose body contains NO occurrence of the proxied
+    // base URL ("localhost"), so the link-rewrite pass makes no change. This is
+    // the exact shape that used to fall through the handler without returning a
+    // Response → Hono "Context is not finalized" 500. See asset-fallback.spec.ts.
+    if (pathname === `/no-host.css`) {
+      res.writeHead(200, { 'Content-Type': `text/css` });
+      res.end(`.hero{color:red;background:url(/img/bg.png)}`);
+      return;
+    }
+    // Same shape for JavaScript.
+    if (pathname === `/no-host.js`) {
+      res.writeHead(200, { 'Content-Type': `application/javascript` });
+      res.end(`console.log("no base url here at all");`);
+      return;
+    }
+
     if (pathname.startsWith(FIXTURE_PREFIX)) {
       const rel = pathname.slice(FIXTURE_PREFIX.length);
       const fsPath = join(process.cwd(), `tests/fixtures`, `${rel}.local.html`);
@@ -263,6 +286,9 @@ export default async function globalSetup() {
     publicHost: `localhost:${TEST_PORT}`,
     ...(!isLive ? { proxyPort: String(MOCK_PORT), proxyProtocol: `http` } : {}),
     dbPath: DB_TEST_PATH,
+    // Disable the event-loop watchdog under test: nothing here wedges the loop,
+    // and a stray SIGKILL would surface as a baffling "server disconnected".
+    watchdogMs: `0`,
     ...(magicurlUrl && magicurlUrl !== `1` ? { magicurlApi: magicurlUrl } : {}),
     ...(!isLive ? { magicurlApi: `http://localhost:${MOCK_MAGICURL_PORT}` } : {}),
   };

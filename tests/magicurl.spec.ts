@@ -163,12 +163,21 @@ test(`selecting magicurl from dropdown posts to __session-mode and reloads`, asy
   const sessionId = extractSessionId(page.url());
   expect(sessionId).toBeTruthy();
 
-  // Select magicurl from the dropdown (the actual user interaction)
+  // Select magicurl from the dropdown (the actual user interaction). The
+  // onChange handler fires a fire-and-forget `fetch(...).then(reload)`
+  // (injected.js `setSessionMode`) — selectOption() only waits for the DOM
+  // event to dispatch, not for that request to land server-side. Wait for the
+  // actual POST response before asserting on the config file it writes, or
+  // this races (and the race gets easier to hit under parallel-test load).
   const select = page.locator(`select`);
   await expect(select).toBeVisible();
+  const modePosted = page.waitForResponse(
+    res => res.url().includes(`/__session-mode`) && res.request().method() === `POST`,
+  );
   await select.selectOption(`magicurl`);
+  await modePosted;
 
-  // The handler posts to __session-mode then reloads — wait for navigation
+  // The handler reloads after the POST resolves — wait for that navigation.
   await page.waitForLoadState(`load`);
 
   // Verify the config file was written with mode: magicurl

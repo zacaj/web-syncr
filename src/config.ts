@@ -16,6 +16,19 @@ export const env = {
   // it in ~5-15s); the old 3s budget left ~0ms for challenge resolution, so the
   // challenge page was captured as-is.
   magicurlTimeoutMs: 30000,
+
+  // ── Safety guards (all overridable via env; set to 0 to disable) ───────────
+  // Hard ceiling on a single request. A load that exceeds this returns 504
+  // instead of hanging a connection open forever. Must be > magicurlTimeoutMs.
+  requestTimeoutMs: 60000,
+  // Bodies larger than this skip the link-rewrite/header-inject pass entirely
+  // (streamed through untouched). Prevents a pathological megabyte-scale page
+  // from monopolising the single event-loop thread.
+  rewriteMaxBytes: 8_000_000,
+  // Watchdog: if the event loop stays blocked longer than this, a monitor
+  // thread hard-kills the process so the container/pnpm supervisor restarts it.
+  // This is the only thing that can recover a true CPU spin. 0 disables.
+  watchdogMs: 30000,
   ...process.env,
 };
 

@@ -9,7 +9,7 @@ if [ -z "$BUMP" ]; then
 fi
 
 # Extract current version from package.json5
-CURRENT=$(grep -oP '(?<=version: ")[^"]+' package.json5)
+CURRENT=$(grep -oP "(?<=version: ['])[^']+" package.json5)
 echo "Current version: $CURRENT"
 
 # Compute new version
