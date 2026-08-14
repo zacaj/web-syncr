@@ -15,11 +15,8 @@
 */
 
 import { defineConfig } from "eslint/config";
-import baseConfig from "./common/eslint/base.config.js";
-import formatConfig from "./common/eslint/format.config.js";
-// import reactConfig from "./common/eslint/react.config.js";
+import baseConfig from "@zacaj/eslint-config-base";
 import tseslint from "typescript-eslint";
-import tsConfig from "./common/eslint/typescript.config.js";
 
 // /** @type { import("eslint").Linter.Config[] } */
 export default defineConfig(
@@ -27,10 +24,8 @@ export default defineConfig(
     ignores: [`**/.template*/`, `db/`, `build/`, `.*/`, `playwright-report/`, `test-results/`],
   },
   baseConfig,
-  tsConfig,
-  formatConfig,
   {
-    files: [`src/injected.js`, `common/**`],
+    files: [`src/injected.js`],
     ...tseslint.configs.disableTypeChecked,
   },
 );

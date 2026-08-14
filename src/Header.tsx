@@ -1,4 +1,4 @@
-import type { Opaque } from '@common/util';
+import type { Opaque } from 'local-util/index';
 import { h, type TargetedEvent } from 'preact';
 import { useState } from "preact/hooks";
 import type { LoadMode, Session } from './config';

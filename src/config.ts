@@ -1,4 +1,4 @@
-import type { JsonDate, Opaque } from "common/util/index";
+import type { JsonDate, Opaque } from "local-util/index";
 
 export const env = {
   localPort: 443,

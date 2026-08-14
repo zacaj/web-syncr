@@ -1,14 +1,11 @@
 {
-  "extends": "./common/tsconfig.base.json",
+  "extends": "@zacaj/eslint-config-base/tsconfig.base.json",
   "compilerOptions": {
     "ignoreDeprecations": "5.0",
     "baseUrl": "./",
     "paths": {
       "~/*": [
         "./src/*"
-      ],
-      "@common/*": [
-        "./common/*"
       ],
     },
     "composite": false,
@@ -23,5 +20,5 @@
     ],
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["db/**", "playwright-report/**", "test-results/**", "build/**"]
+  "exclude": ["db/**", "playwright-report/**", "test-results/**", "build/**", "common/**"]
 }

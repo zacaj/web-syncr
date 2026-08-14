@@ -1,12 +1,12 @@
 import { expect, test } from '@playwright/test';
-// Side-effect import: common/util/strings.ts installs a custom
+// Side-effect import: local-util/strings.ts installs a custom
 // String.prototype.trimEnd/trimStart (accepting a char-class argument) that
 // lastLines() below depends on. src/server.ts gets this for free via its own
-// import of common/util/index; a test importing common/util/files in isolation
+// import of local-util/index; a test importing local-util/files in isolation
 // would NOT have it installed, so we import it explicitly here to match real
 // runtime behavior.
-import 'common/util/index';
-import { lastLines } from 'common/util/files';
+import 'local-util/index';
+import { lastLines } from 'local-util/files';
 import { unlinkSync, writeFileSync } from 'node:fs';
 
 // Tests in this file can run in parallel across workers (fullyParallel), so

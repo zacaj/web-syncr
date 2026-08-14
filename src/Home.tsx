@@ -1,4 +1,4 @@
-import type { JsonDate } from '@common/util';
+import type { JsonDate } from 'local-util/index';
 import { h } from 'preact';
 import type { SessionHead } from './config';
 

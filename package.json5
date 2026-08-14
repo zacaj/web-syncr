@@ -46,9 +46,8 @@
     'preact-render-to-string': '^6',
   },
   devDependencies: {
-    '@eslint/js': '^9',
-    '@stylistic/eslint-plugin': '^2',
-    eslint: '^9',
+    '@zacaj/eslint-config-base': '^0.2.0',
+    eslint: '^10.4.0',
     'eslint-plugin-json': '*',
     'typescript-eslint': '^8',
 
