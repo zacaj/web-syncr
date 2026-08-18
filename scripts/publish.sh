@@ -53,7 +53,7 @@ pnpm docker:compose
 
 echo ""
 echo "==> Bumping version in package.json5..."
-sed -i "s/version: \"$CURRENT\"/version: \"$NEW_VERSION\"/" package.json5
+sed -i "s/version: '$CURRENT'/version: '$NEW_VERSION'/" package.json5
 
 echo ""
 echo "==> Committing version bump and tagging git..."

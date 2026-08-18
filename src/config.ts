@@ -1,4 +1,4 @@
-import type { JsonDate, Opaque } from "local-util/index";
+import type { JsonDate, Opaque } from "@zacaj/util";
 
 export const env = {
   localPort: 443,

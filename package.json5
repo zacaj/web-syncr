@@ -40,7 +40,7 @@
     hono: '^4',
     'http-proxy-middleware': '^3',
 
-    'jest-diff': '^30',
+    '@zacaj/util': '^0.1.1',
 
     preact: '^10',
     'preact-render-to-string': '^6',

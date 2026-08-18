@@ -60,9 +60,9 @@ Config options (`.env`):
 - Both use **Preact** (not React). JSX compiles with `jsxFactory: "h"` (see `tsconfig.json`).
 - Event handlers in Header/Home use raw JS strings cast as `Hack` type — this is intentional: the components render server-side and execute in the proxied page's browser, not in a Preact VDOM.
 
-### `common/` package
+### Shared utilities and ESLint config
 
-Shared TypeScript utilities (`util/files.ts`, `util/index.ts`, etc.) and ESLint configs. Imported via `@common/*` and `common/*` path aliases. In production Docker, `build/common` is symlinked into `node_modules` as both `common` and `@common`.
+Framework-agnostic helpers (`appendJsonL`/`readJsonL`/`lastLines`, `jsonDate`, `Opaque`, string/array/object utils, etc.) come from the published `@zacaj/util` package — `import from "@zacaj/util"` for the barrel, or a subpath like `"@zacaj/util/files"` for a single file. ESLint config comes from `@zacaj/eslint-config-base` the same way. Both ship real commented `.ts` source under `node_modules/@zacaj/*/src` alongside the build, so declaration-map "go to definition" lands on readable source, not just `.d.ts`.
 
 ### Tests
 

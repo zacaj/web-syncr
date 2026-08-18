@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { jsonDate } from 'local-util/index';
+import { jsonDate } from '@zacaj/util';
 import { injectHeaderAndScript, replaceAllPatterns } from '../src/rewrite';
 
 // These are pure-function unit tests (no browser / no server). They guard the

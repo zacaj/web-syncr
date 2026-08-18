@@ -1,4 +1,4 @@
-import type { JsonDate } from 'local-util/index';
+import type { JsonDate } from '@zacaj/util';
 import { h } from 'preact';
 import type { SessionHead } from './config';
 
