@@ -29,6 +29,30 @@ function sessionPath(sessionId: string) {
   return `${env.dbPath}/session_${sessionId}.jsonl`;
 }
 
+// How many lines the reload/nav-dedup URL lookup scans before giving up and
+// treating a page as "new". Deliberately far larger than the ~20-entry window
+// used for the history dropdown/Latest-button UI: a real session accumulates
+// many more page visits than that dropdown ever needs to show, and if an
+// older page falls out of a too-small dedup window, reloading it gets
+// misread as a fresh navigation and re-appended as the newest entry —
+// burying whatever another tab/browser had navigated to since.
+const dedupLookbackLines = 500;
+
+/**
+ * Finds `realUrl` in the session's recent history. `sessions` is the small
+ * window already loaded for UI purposes — if that window is full (so the
+ * file may hold more lines it doesn't cover) and the URL isn't in it, falls
+ * back to a much wider read before concluding the URL was never visited.
+ */
+function findPrevSession(sessionId: string, sessions: Session[], realUrl: string, excludeTimestamp?: string): Session | undefined {
+  const matches = (s: Session) => new URL(s.url).toString() === realUrl && s.timestamp !== excludeTimestamp;
+  const found = sessions.find(matches);
+  if (found || sessions.length < 20)
+    return found;
+  const wider = lastJsonLs<Session>(sessionPath(sessionId), dedupLookbackLines, []);
+  return wider.find(matches);
+}
+
 function getSessionMode(sessionId: string): LoadMode {
   const path = sessionConfigPathFn(sessionId);
   if (existsSync(path)) {
@@ -157,7 +181,7 @@ server.post(`/__client-nav`, async (c) => {
   const realUrl = wrappedUrlToReal(wrappedUrl);
 
   const sessions = lastJsonLs<Session>(sessionPath(sessionId), 20, []);
-  const prevSession = sessions.find(s => new URL(s.url).toString() === realUrl);
+  const prevSession = findPrevSession(sessionId, sessions, realUrl);
   const session = prevSession ?? appendJsonL<Session>(sessionPath(sessionId), {
     url: realUrl,
     timestamp: jsonDate(),
@@ -278,7 +302,7 @@ server.all(`*`, async (c) => {
       newUrl.host = `${baseUrl}:${env.proxyPort}`;
       newUrl.protocol = `${env.proxyProtocol}:`;
       realUrl = newUrl.toString();
-      const prevSession = sessions.find(s => new URL(s.url).toString() === realUrl && s.timestamp !== _session?.timestamp);
+      const prevSession = findPrevSession(sessionId, sessions, realUrl, _session?.timestamp);
       const isPage = req.header(`Sec-Fetch-Mode`) === `navigate` && newUrl.pathname.length > 1;
       if (isPage && _session?.url !== realUrl) {
         const isNotRefresh = req.header(`Sec-Purpose`) === `prefetch` || (req.header(`Cache-Control`) && req.header(`Cache-Control`)!==`no-cache` && req.header(`Cache-Control`)!==`max-age=0`);

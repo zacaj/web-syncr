@@ -29,7 +29,8 @@
       "settings": { },
       "extensions": [
         "dbaeumer.vscode-eslint",
-        "blueglassblock.better-json5"
+        "blueglassblock.better-json5",
+        "ms-playwright.playwright"
       ]
     }
   },

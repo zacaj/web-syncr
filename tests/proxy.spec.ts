@@ -189,6 +189,50 @@ test(`clicking a history entry in the sessions dropdown triggers real navigation
   await expect(page.locator(`h1`)).toBeVisible();
 });
 
+test(`reloading a page buried past the dedup lookback window doesn't duplicate it as newest`, async ({ page, context }) => {
+  // Regression test: the reload/nav "is this URL already in history" check
+  // only ever searched the last 20 JSONL lines (the same window used to
+  // populate the history dropdown UI). In a session with real usage history,
+  // an already-visited page easily falls outside that window — so reloading
+  // it was indistinguishable from a brand-new navigation and got re-appended
+  // as the newest entry, burying whatever another browser had navigated to
+  // and hiding the Latest button behind it.
+  await createSession(page);
+  await page.locator(`a[href="/page2"]`).click();
+  await expect(page.locator(`h1`)).toContainText(`Mock Page 2`);
+  const sessionId = extractSessionId(page.url());
+  expect(sessionId).toBeTruthy();
+
+  // Pad history with >20 distinct-URL navigations so /page2 falls out of the
+  // small lookback window. Query strings keep each visit's realUrl unique —
+  // revisiting the exact same URL would just resolve to its existing entry
+  // instead of appending a fresh one.
+  const base = page.url().replace(/\/page2$/, ``);
+  for (let i = 0; i < 25; i++) {
+    await page.goto(`${base}/with-csp?i=${i}`);
+    await expect(page.locator(`h1`)).toContainText(`CSP Page`);
+  }
+
+  // A second browser opens the same session and navigates to a fresh page.
+  const secondContext = await context.browser()!.newContext({ ignoreHTTPSErrors: true });
+  const secondPage = await secondContext.newPage();
+  await secondPage.goto(`${base}/with-link`);
+  await expect(secondPage.locator(`h1`)).toContainText(`With Absolute Link`);
+  await secondContext.close();
+
+  // First browser reloads its now-stale, long-buried page2.
+  await page.goto(`${base}/page2`);
+  await expect(page.locator(`h1`)).toContainText(`Mock Page 2`);
+
+  const lines = readFileSync(`${DB_TEST_PATH}/session_${sessionId!}.jsonl`, `utf8`).trim().split(`\n`);
+  const entries = lines.map((l: string) => JSON.parse(l) as { url: string; timestamp: string });
+  // Revisiting page2 must not re-append it as the newest entry.
+  expect(entries.at(-1)!.url).not.toContain(`/page2`);
+
+  // The Latest button should point back at the second browser's page.
+  await expect(page.locator(`button:has-text("Latest")`)).toBeVisible();
+});
+
 test(`body tag with attributes containing > chars is injected correctly`, async ({ page }) => {
   // Regression test for issue where regex matching <body ...> would break
   // if attributes contained special characters like > inside quoted values.
