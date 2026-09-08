@@ -2,7 +2,7 @@ ARG NODE_VERSION=24-slim
 FROM node:${NODE_VERSION} AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
+RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
 COPY . /app
 WORKDIR /app
 
