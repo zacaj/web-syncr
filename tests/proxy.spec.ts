@@ -23,7 +23,7 @@ test(`proxied page has session header bar injected`, async ({ page }) => {
   const sessionId = extractSessionId(page.url());
   expect(sessionId).toBeTruthy();
   // Header select has data-sid={sessionId}
-  await expect(page.locator(`select[data-sid="${sessionId}"]`)).toBeVisible();
+  await expect(page.locator(`#web-syncr-mode[data-sid="${sessionId}"]`)).toBeVisible();
 });
 
 test(`proxied page renders fixture content`, async ({ page }) => {
@@ -124,7 +124,7 @@ test(`CSP meta tags are stripped so injected handlers work`, async ({ page }) =>
   expect(html).not.toContain(`Content-Security-Policy`);
 
   // Inline handlers should work — the mode dropdown fires setSessionMode
-  const select = page.locator(`select`);
+  const select = page.locator(`#web-syncr-mode`);
   await expect(select).toBeVisible();
 });
 
@@ -248,7 +248,7 @@ test(`body tag with attributes containing > chars is injected correctly`, async 
   expect(sessionId).toBeTruthy();
 
   // Verify the mode select is accessible
-  const select = page.locator(`select[data-sid="${sessionId}"]`);
+  const select = page.locator(`#web-syncr-mode[data-sid="${sessionId}"]`);
   await expect(select).toBeVisible();
 
   // The HTML should contain the injected web-syncr spacer div

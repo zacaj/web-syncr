@@ -1,6 +1,7 @@
+import { readFileSync } from "node:fs";
 import { renderToStringAsync } from "preact-render-to-string";
 import { Header } from "./Header";
-import type { LoadMode, Session } from "./config";
+import { readSessionConfig, type LoadMode, type Session } from "./config";
 
 /**
  * Replace every occurrence of each key in `replacements` with its value.
@@ -63,13 +64,18 @@ export async function injectHeaderAndScript(
   injectedJs: string,
   mode: LoadMode = `proxy`,
 ): Promise<string> {
-  const headerHtml = await renderToStringAsync(Header({ session, history, mode }));
+  const syncMode = readSessionConfig(session.sessionId).syncMode ?? `off`;
+  const headerHtml = await renderToStringAsync(Header({ session, history, mode, syncMode }));
+  // Read here rather than taking it as a parameter like injectedJs: it never
+  // varies by caller, and threading it through all six call sites in server.ts
+  // would be noise. Re-read per request to match injected.js's dev-reload feel.
+  const anchorJs = readFileSync(`./src/anchor.js`, `utf8`);
   // Strip CSP meta tags — the response headers are already stripped, but inline
   // <meta http-equiv="Content-Security-Policy"> would still block our injected handlers.
   body = body.replace(/<meta[^>]+http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi, ``);
   // Regex matches <body ...> accounting for quoted attributes that may contain special chars
   const bodyOpenRegex = /(<body(?:[^>"']|"[^"]*"|'[^']*')*>)/i;
-  const suffix = `<script>window.__webSyncrMode=${JSON.stringify(mode)};` + injectedJs + `</script>` + headerHtml + `<div id="web-syncr-spacer" style="height:4rem"></div>`;
+  const suffix = `<script>window.__webSyncrMode=${JSON.stringify(mode)};window.__webSyncrSyncMode=${JSON.stringify(syncMode)};` + anchorJs + injectedJs + `</script>` + headerHtml + `<div id="web-syncr-spacer" style="height:4rem"></div>`;
   // Replacer must be a function, not a string: a string replacer treats `$1`, `$&`,
   // `` $` ``, `$'` etc as backreference tokens, and injectedJs/headerHtml/the page's
   // own body tag can easily contain a literal "$" followed by a digit (injected.js's

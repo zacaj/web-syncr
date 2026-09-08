@@ -15,7 +15,8 @@ import { createServer } from 'node:https';
 import * as Path from 'node:path';
 import { renderToStringAsync } from "preact-render-to-string";
 import { ChallengePage } from "./ChallengePage";
-import { env, sessionConfigPath as sessionConfigPathFn, type LoadMode, type Session, type SessionHead } from "./config";
+import { env, readSessionConfig, writeSessionConfig, type Anchor, type LoadMode, type Session, type SessionHead, type SyncMode } from "./config";
+import { flushLiveState, getLiveState, publishLiveState } from "./session-state";
 import { Home } from "./Home";
 import { detectUnresolvedChallenge, getDomHtml, isChallengeTimeout, lookupAsset, renderPage, streamAsset, vncUrl } from './magicurl';
 import { injectHeaderAndScript, replaceAllPatterns } from "./rewrite";
@@ -54,12 +55,7 @@ function findPrevSession(sessionId: string, sessions: Session[], realUrl: string
 }
 
 function getSessionMode(sessionId: string): LoadMode {
-  const path = sessionConfigPathFn(sessionId);
-  if (existsSync(path)) {
-    try { return (JSON.parse(readFileSync(path, `utf8`)) as { mode?: LoadMode }).mode ?? `proxy` }
-    catch { return `proxy` }
-  }
-  return `proxy`;
+  return readSessionConfig(sessionId).mode ?? `proxy`;
 }
 
 const server = new Hono();
@@ -145,11 +141,15 @@ server.onError((err, c) => {
 });
 
 server.post(`/`, async c => {
-  const { url } = await c.req.parseBody<{ url: string }>();
+  const { url, syncMode } = await c.req.parseBody<{ url: string; syncMode?: SyncMode }>();
   let [subdomainOrPublicHost, publicHost] = new URL(c.req.url).host.split(`__.`);
   publicHost ??= subdomainOrPublicHost!;
   const sessionId = zid(`SN`).toLowerCase() as Opaque<`session`>;
   appendJsonL<Session>(sessionPath(sessionId), { url, timestamp: jsonDate() });
+  // `off` is already the implicit default (readSessionConfig().syncMode ?? `off`),
+  // so skip writing a config file for it — keeps a fresh session config-free,
+  // same as the default `proxy` load mode.
+  if (syncMode && syncMode !== `off`) writeSessionConfig(sessionId, { syncMode });
   const userId = getCookie(c, `z.web-syncr.userId`) as Opaque<`user`> | null;
   if (userId)
     appendJsonL<SessionHead>(`${env.dbPath}/sessions.jsonl`, {
@@ -234,18 +234,51 @@ server.get(`/__poll-challenge`, async c => {
 });
 
 server.post(`/__session-mode`, async c => {
-  const { sessionId, mode } = await c.req.json<{ sessionId: string; mode: LoadMode }>();
+  const { sessionId, mode, syncMode } = await c.req.json<{ sessionId: string; mode?: LoadMode; syncMode?: SyncMode }>();
   if (!existsSync(sessionPath(sessionId))) {
     c.status(404);
     return c.json({ error: `Session not found` });
   }
-  // Preserve existing magicSessionId when switching modes
-  const cfgPath = sessionConfigPathFn(sessionId);
-  const existing = existsSync(cfgPath)
-    ? (() => { try { return JSON.parse(readFileSync(cfgPath, `utf8`)) as Dict } catch { return {} } })()
-    : {};
-  await writeFile(cfgPath, JSON.stringify({ mode, magicSessionId: existing.magicSessionId }));
-  return c.json({ ok: true });
+  // writeSessionConfig merges, so an unrelated key (magicSessionId, syncMode)
+  // survives a change to any other one.
+  const patch: { mode?: LoadMode; syncMode?: SyncMode } = {};
+  if (mode) patch.mode = mode;
+  if (syncMode) patch.syncMode = syncMode;
+  return c.json({ ok: true, config: writeSessionConfig(sessionId, patch) });
+});
+
+// ── Reading-position sync ───────────────────────────────────────────────────
+
+server.get(`/__session-state`, c => {
+  const sessionId = c.req.query(`sessionId`);
+  if (!sessionId || !existsSync(sessionPath(sessionId))) {
+    c.status(404);
+    return c.json({ error: `Session not found` });
+  }
+  return c.json({ state: getLiveState(sessionId), syncMode: readSessionConfig(sessionId).syncMode ?? `off` });
+});
+
+server.post(`/__session-state`, async c => {
+  const { sessionId, clientId, url, anchor, deviceLabel, claimDriver } = await c.req.json<{
+    sessionId: string;
+    clientId: string;
+    url: string;
+    anchor: Anchor | null;
+    deviceLabel: string;
+    claimDriver?: boolean;
+  }>();
+  if (!sessionId || !existsSync(sessionPath(sessionId))) {
+    c.status(404);
+    return c.json({ error: `Session not found` });
+  }
+  const state = publishLiveState(sessionId, {
+    clientId,
+    url: wrappedUrlToReal(url),
+    anchor: anchor ?? null,
+    deviceLabel: deviceLabel || `device`,
+    claimDriver,
+  });
+  return c.json({ ok: true, seq: state.seq, driverId: state.driverId });
 });
 
 const ts = () => new Date().toISOString().replace(`T`, ` `).slice(0, 23);
@@ -614,3 +647,15 @@ serve({
     console.log(`Event-loop watchdog armed (threshold ${watchdogMs}ms)`);
   }
 });
+
+// `docker compose` swaps containers on a deploy by sending SIGTERM (falling
+// back to SIGKILL after its grace period) — a known, imminent shutdown, not
+// the unpredictable crash the live-state debounce is sized for. Without this,
+// any reading position published in the last couple seconds before a deploy
+// never reaches disk, and the fresh process comes up with nothing to restore.
+for (const sig of [`SIGTERM`, `SIGINT`] as const) {
+  process.on(sig, () => {
+    flushLiveState();
+    process.exit(0);
+  });
+}

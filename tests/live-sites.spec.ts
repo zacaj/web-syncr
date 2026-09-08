@@ -107,7 +107,7 @@ async function switchToMagicurl(page: Page): Promise<any> {
   // well past Playwright's default 30s navigation timeout.
   const resp = await page.reload({ waitUntil: `domcontentloaded`, timeout: 60_000 });
   expect(await resp?.headerValue(`x-load-mode`), `reload after mode switch was not served by magicurl — check server logs for renderPage errors`).toBe(`magicurl`);
-  await expect(page.locator(`select[data-sid]`), `mode dropdown still shows proxy after mode switch — Header may have been rendered with wrong mode`).toHaveValue(`magicurl`);
+  await expect(page.locator(`#web-syncr-mode`), `mode dropdown still shows proxy after mode switch — Header may have been rendered with wrong mode`).toHaveValue(`magicurl`);
   return resp;
 }
 

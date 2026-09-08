@@ -148,7 +148,7 @@ test(`mode select in header shows magicurl option`, async ({ page }) => {
   await createMagicurlSession(page);
 
   // The header should have a select with both options
-  const select = page.locator(`select`);
+  const select = page.locator(`#web-syncr-mode`);
   await expect(select).toBeVisible();
 
   const options = await select.locator(`option`).all();
@@ -169,7 +169,7 @@ test(`selecting magicurl from dropdown posts to __session-mode and reloads`, asy
   // event to dispatch, not for that request to land server-side. Wait for the
   // actual POST response before asserting on the config file it writes, or
   // this races (and the race gets easier to hit under parallel-test load).
-  const select = page.locator(`select`);
+  const select = page.locator(`#web-syncr-mode`);
   await expect(select).toBeVisible();
   const modePosted = page.waitForResponse(
     res => res.url().includes(`/__session-mode`) && res.request().method() === `POST`,
@@ -186,7 +186,7 @@ test(`selecting magicurl from dropdown posts to __session-mode and reloads`, asy
   expect(config.mode).toBe(`magicurl`);
 
   // After reload, the dropdown should still show magicurl
-  await expect(page.locator(`select`)).toHaveValue(`magicurl`);
+  await expect(page.locator(`#web-syncr-mode`)).toHaveValue(`magicurl`);
 });
 
 // ── Mode persistence ────────────────────────────────────────────────────────

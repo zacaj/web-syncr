@@ -5,6 +5,28 @@ import https from 'node:https';
 import { expect, type Page } from '@playwright/test';
 import { join } from 'node:path';
 
+import type { Anchor } from '../src/config';
+
+/** The subset of `src/anchor.js`'s window API the tests drive. */
+export type AnchorHit = { el: Element; fraction: number; via: string; candidate: number };
+export type AnchorApi = {
+  scan: () => { x: number; container: Element | null };
+  capture: () => Anchor;
+  resolve: (a: Anchor) => AnchorHit | null;
+  settleTo: (a: Anchor, opts?: { budgetMs?: number }) => Promise<AnchorHit | null>;
+  readingLineY: () => number;
+  headerHeight: () => number;
+};
+declare global {
+  interface Window {
+    __webSyncrAnchor: AnchorApi;
+    /** Defined by `src/injected.js`'s sync client. */
+    webSyncrJump: () => void;
+    /** Defined by the `/late-shift` mock fixture. */
+    __insertShift: () => void;
+  }
+}
+
 export const PID_FILE = `/tmp/web-syncr-test-server.pid`;
 export const DB_TEST_PATH = `/tmp/web-syncr-test-db`;
 export const TEST_PORT = 29443;
@@ -32,6 +54,70 @@ export const MOCK_PAGES: Record<string, { title: string; html: string }> = {
       <h1>With Absolute Link</h1>
       <a id="abs" href="http://localhost/page2">absolute link</a>
     </body></html>`,
+  },
+  // Exercises the anchor column scan. Deliberately contains both kinds of
+  // decoy the scan must reject:
+  //   - `.rail`: a NON-semantic sidebar. No nav/aside tag to key off, so only
+  //     the text-volume score can reject it (a hit-count score would pick it,
+  //     since it lands 9 short items to the article's ~4 paragraphs).
+  //   - `.banner`: position:sticky, which sits at the same viewport coordinate
+  //     at every scroll offset and would otherwise anchor you to nowhere.
+  '/long-article': {
+    title: `Long Article`,
+    html: `<html><head><title>Long Article</title><style>
+      body { margin: 0; font: 16px/1.5 system-ui, sans-serif; }
+      .banner { position: sticky; top: 0; background: #cdf; padding: 0.5rem; }
+      .wrap { display: flex; gap: 2rem; }
+      .rail { width: 180px; flex: none; padding: 1rem; background: #eee; }
+      .rail div { padding: 0.4rem 0; }
+      article { flex: 1; max-width: 42rem; padding: 1rem; }
+      p { margin: 0 0 1.4rem; }
+    </style></head><body>
+      <div class="banner">Sticky banner</div>
+      <div class="wrap">
+        <div class="rail">RAIL_ITEMS</div>
+        <article id="article">
+          <h1>Long Article</h1>
+          ARTICLE_PARAS
+        </article>
+      </div>
+      <footer>Footer text</footer>
+    </body></html>`
+      .replace(`RAIL_ITEMS`, Array.from({ length: 30 }, (_, i) => `<div>Rail item ${i}</div>`).join(``))
+      .replace(`ARTICLE_PARAS`, Array.from({ length: 60 }, (_, i) =>
+        `<p id="para-${i}">Paragraph ${i}. ${`Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. `.repeat(3)}</p>`).join(``)),
+  },
+  // Content that grows *above* the reading position mid-restore — the exact
+  // failure mode settleTo's convergence loop exists for. The insertion is
+  // exposed as a function rather than a timer so the test can trigger it at a
+  // controlled moment; a timer races Playwright's evaluate round-trip and the
+  // shift lands before the restore even starts, making the test vacuous.
+  '/late-shift': {
+    title: `Late Shift`,
+    html: `<html><head><title>Late Shift</title><style>
+      /* Chrome's native scroll anchoring would otherwise absorb the insertion
+         and the test would be measuring the browser, not our convergence loop.
+         Plenty of real sites disable it for exactly this kind of jumpiness. */
+      body { margin: 0; font: 16px/1.5 system-ui, sans-serif; overflow-anchor: none; }
+      article { max-width: 42rem; padding: 1rem; }
+      p { margin: 0 0 1.4rem; }
+      .shift { height: 400px; background: #fdd; }
+    </style></head><body>
+      <article id="article">
+        <div id="shift-host"></div>
+        ARTICLE_PARAS
+      </article>
+      <script>
+        window.__insertShift = function() {
+          var d = document.createElement('div');
+          d.className = 'shift';
+          d.textContent = 'Late-loading block';
+          document.getElementById('shift-host').appendChild(d);
+        };
+      </script>
+    </body></html>`
+      .replace(`ARTICLE_PARAS`, Array.from({ length: 60 }, (_, i) =>
+        `<p id="lp-${i}">Late paragraph ${i}. ${`Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium totam rem aperiam. `.repeat(3)}</p>`).join(``)),
   },
   '/with-csp': {
     title: `With CSP`,
@@ -66,6 +152,11 @@ export async function createSession(
 ): Promise<void> {
   await page.goto(`/`);
   await page.fill(`input[type="url"][name="url"]`, originUrl);
+  // The home form now defaults sync to `live`; most callers here spin up
+  // independent browser contexts against the same session and don't expect
+  // one to auto-follow the other's navigation, so pin it back to `off`
+  // unless a test opts in explicitly via the session-mode endpoint.
+  await page.selectOption(`form[action="/"] select[name="syncMode"]`, `off`);
   await Promise.all([
     page.waitForURL(wrappedRe),
     page.locator(`form[action="/"] button[type="submit"]`).first().click(),
@@ -148,7 +239,7 @@ export async function checkForChallenge(
   return false;
 }
 
-function readDotEnv(path: string): Record<string, string> {
+export function readDotEnv(path: string): Record<string, string> {
   try {
     return Object.fromEntries(
       readFileSync(path, `utf8`)
@@ -161,7 +252,7 @@ function readDotEnv(path: string): Record<string, string> {
   }
 }
 
-function waitForServer(url: string, timeoutMs = 20_000): Promise<void> {
+export function waitForServer(url: string, timeoutMs = 20_000): Promise<void> {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeoutMs;
     function attempt() {
