@@ -8,8 +8,8 @@ if [ -z "$BUMP" ]; then
   exit 1
 fi
 
-# Extract current version from package.json5
-CURRENT=$(grep -oP "(?<=version: ['])[^']+" package.json5)
+# Extract current version from package.json
+CURRENT=$(grep -oP '(?<="version": ")[^"]+' package.json)
 echo "Current version: $CURRENT"
 
 # Compute new version
@@ -52,12 +52,12 @@ pnpm docker:compose
 
 
 echo ""
-echo "==> Bumping version in package.json5..."
-sed -i "s/version: '$CURRENT'/version: '$NEW_VERSION'/" package.json5
+echo "==> Bumping version in package.json..."
+sed -i "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW_VERSION\"/" package.json
 
 echo ""
 echo "==> Committing version bump and tagging git..."
-git add package.json5
+git add package.json
 git commit -m "chore: release v$NEW_VERSION"
 git tag "v$NEW_VERSION"
 git tag -f "v$MAJOR.$MINOR"

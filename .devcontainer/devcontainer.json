@@ -1,11 +1,11 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/typescript-node
 {
-	"name": "Node.js & TypeScript",
-	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/typescript-node:dev-24-bookworm",
+  "name": "Node.js & TypeScript",
+  // Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:dev-24-bookworm",
 
-	"features": {
+  "features": {
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
       "installDockerBuildx": true,
       "installDockerComposeSwitch": true,
@@ -15,10 +15,10 @@
     "ghcr.io/devcontainers-extra/features/pnpm:2": {
       "version": "latest"
     },
-    "ghcr.io/devcontainers-extra/features/mkcert:1": {},
+    "ghcr.io/devcontainers-extra/features/mkcert:1": { },
     "ghcr.io/schlich/devcontainer-features/playwright": {
       "installBrowsers": true,
-			"browsers": "chromium",
+      "browsers": "chromium",
     },
   },
   "postCreateCommand": {
@@ -29,7 +29,6 @@
       "settings": { },
       "extensions": [
         "dbaeumer.vscode-eslint",
-        "blueglassblock.better-json5",
         "ms-playwright.playwright"
       ]
     }
@@ -41,8 +40,8 @@
       "type": "bind"
     }
   ],
-  "runArgs": ["-p", "29443:443","--add-host=host.docker.internal:host-gateway"],
-	// "forwardPorts": [
+  "runArgs": [ "-p", "29443:443", "--add-host=host.docker.internal:host-gateway" ],
+  // "forwardPorts": [
   //   29443
   // ],
 }

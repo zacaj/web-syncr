@@ -93,7 +93,6 @@ The mock server serves `.local.html` at `/fixtures/{host}/{path}`. This lets `fi
 
 ## Key gotchas
 
-- **`package.json5`** — The package file uses JSON5 (comments allowed). Do not rename or convert to `.json`.
 - **HTTPS required** — Dev server fails to start without cert paths in `.env`. See `.env.template` for expected keys (`httpsKey`, `httpsCert`).
 - **Node >=24 required** — Uses native APIs not available in earlier versions.
 - **`pnpm typecheck` does not emit** — `noEmit: true` is set in `tsconfig.json`. The Dockerfile runs `tsc` directly during production builds; `tsx` runs source directly in dev.

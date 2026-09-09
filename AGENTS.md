@@ -9,8 +9,6 @@ Single-page web proxy server using Hono + Preact.
 - `pnpm docker:start` - Run in Docker dev mode
 - `pnpm docker:start:prod` - Run production Docker image
 
-**Note**: Uses `package.json5` (not `.json`) - pnpm reads this directly.
-
 ## Architecture
 
 - Entry: `src/server.ts` (Hono server)
@@ -56,5 +54,4 @@ Optional HTTPS certs:
 
 - Dev server requires HTTPS certificates - won't start without them
 - Node.js >=24 required (check with `node --version`)
-- Uses `package.json5` not `.json` - don't convert to JSON
 - ESLint uses flat config (`eslint.config.js`), not legacy
