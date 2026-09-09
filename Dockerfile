@@ -29,4 +29,4 @@ FROM base AS dev
 COPY --from=dev-deps /app/node_modules /app/node_modules
 EXPOSE 443
 # ENV NODE_PATH=/app/build
-CMD [ "pnpm", "start" ]
+CMD [ "node_modules/.bin/tsx", "--env-file=.env", "src/server" ]
