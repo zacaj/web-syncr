@@ -152,10 +152,9 @@ test(`mode select in header shows magicurl option`, async ({ page }) => {
   await expect(select).toBeVisible();
 
   const options = await select.locator(`option`).all();
-  expect(options).toHaveLength(2);
-  const values = await Promise.all(options.map(o => o.innerText()));
-  expect(values).toContain(`proxy`);
-  expect(values).toContain(`magicurl`);
+  expect(options).toHaveLength(3);
+  const values = await Promise.all(options.map(o => o.getAttribute(`value`)));
+  expect(values).toEqual([`proxy`, `magicurl`, `magicurl-noscript`]);
 });
 
 test(`selecting magicurl from dropdown posts to __session-mode and reloads`, async ({ page }) => {

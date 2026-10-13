@@ -61,7 +61,9 @@ function reportClientNavigation() {
   // In magicurl mode, intercept link clicks before SPA frameworks (Inertia, etc.)
   // can turn them into XHR requests. Forces a full page navigate so the server
   // routes through renderPage instead of asset lookup.
-  if (window.__webSyncrMode === `magicurl`) {
+  // Covers `magicurl` and `magicurl-noscript`. Harmless in the latter (the
+  // site's own scripts are gone, so clicks already navigate normally).
+  if (String(window.__webSyncrMode).startsWith(`magicurl`)) {
     document.addEventListener(`click`, function(e) {
       const anchor = e.target.closest(`a[href]`);
       if (!anchor) return;

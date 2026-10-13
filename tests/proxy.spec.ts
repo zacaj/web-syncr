@@ -251,7 +251,13 @@ test(`body tag with attributes containing > chars is injected correctly`, async 
   const select = page.locator(`#web-syncr-mode[data-sid="${sessionId}"]`);
   await expect(select).toBeVisible();
 
-  // The HTML should contain the injected web-syncr spacer div
+  // The header is mounted from JS on `load` (not served as markup — see
+  // rewrite.ts), into a wrapper appended to <html>. Its presence in the live DOM
+  // is what proves the deferred mount actually ran.
   const html = await page.content();
-  expect(html).toContain(`web-syncr-spacer`);
+  expect(html).toContain(`web-syncr-root`);
+  // ...and the mount offsets page content with body padding rather than a spacer.
+  await expect
+    .poll(() => page.evaluate(() => getComputedStyle(document.body).paddingTop))
+    .toBe(`64px`);
 });

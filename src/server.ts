@@ -15,11 +15,11 @@ import { createServer } from 'node:https';
 import * as Path from 'node:path';
 import { renderToStringAsync } from "preact-render-to-string";
 import { ChallengePage } from "./ChallengePage";
-import { env, readSessionConfig, writeSessionConfig, type Anchor, type LoadMode, type Session, type SessionHead, type SyncMode } from "./config";
+import { env, readSessionConfig, stripsScripts, usesMagicurl, writeSessionConfig, type Anchor, type LoadMode, type Session, type SessionHead, type SyncMode } from "./config";
 import { flushLiveState, getLiveState, publishLiveState } from "./session-state";
 import { Home } from "./Home";
 import { detectUnresolvedChallenge, getDomHtml, isChallengeTimeout, lookupAsset, renderPage, streamAsset, vncUrl } from './magicurl';
-import { injectHeaderAndScript, replaceAllPatterns } from "./rewrite";
+import { injectHeaderAndScript, replaceAllPatterns, stripScripts } from "./rewrite";
 import { parseSubdomain, realUrlToWrapped, wrappedUrlToReal } from "./urls";
 import { startWatchdog } from "./watchdog";
 
@@ -82,7 +82,7 @@ const ignoreProxy: H<BlankEnv> = async (c) => {
     const sessionId = parsed.sessionId;
 
     // If magicurl mode, try serving from mount first
-    if (sessionId && getSessionMode(sessionId) === `magicurl`) {
+    if (sessionId && usesMagicurl(getSessionMode(sessionId))) {
       const hit = await lookupAsset(sessionId, realUrl);
       if (hit) {
         const stream = streamAsset(hit.absPath);
@@ -408,7 +408,7 @@ server.all(`*`, async (c) => {
   const mode = getSessionMode(sessionId);
 
   // ── Magicurl mode ──────────────────────────────────────────────────────────
-  if (mode === `magicurl`) {
+  if (usesMagicurl(mode)) {
     const isPage = req.header(`Sec-Fetch-Mode`) === `navigate`;
     const isRefresh = req.header(`Referer`) === req.url || req.header(`Refresh`);
 
@@ -428,7 +428,7 @@ server.all(`*`, async (c) => {
           const challengeBody = await injectHeaderAndScript(challengeHtml, { ...session, sessionId }, sessions, injectedJs, mode);
           const responseHeaders = new Headers();
           responseHeaders.set(`content-type`, `text/html; charset=utf-8`);
-          responseHeaders.set(`x-load-mode`, `magicurl`);
+          responseHeaders.set(`x-load-mode`, mode);
           responseHeaders.set(`x-magicurl-challenge`, pendingChallenge);
           return new Response(challengeBody, { status: 200, headers: responseHeaders });
         }
@@ -447,7 +447,7 @@ server.all(`*`, async (c) => {
           const challengeBody = await injectHeaderAndScript(challengeHtml, { ...session, sessionId }, sessions, injectedJs, mode);
           const responseHeaders = new Headers();
           responseHeaders.set(`content-type`, `text/html; charset=utf-8`);
-          responseHeaders.set(`x-load-mode`, `magicurl`);
+          responseHeaders.set(`x-load-mode`, mode);
           responseHeaders.set(`x-magicurl-challenge`, legacyChallenge);
           return new Response(challengeBody, { status: 200, headers: responseHeaders });
         }
@@ -474,12 +474,17 @@ server.all(`*`, async (c) => {
         replacements[encodeURI(baseUrl)] ??= encodeURI(`${subdomain}__.${publicHost}`);
 
         const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
-        let newBody = replaceAllPatterns(body, replacements) ?? body;
+        // Strip before rewriting and before injecting: rewriting a document whose
+        // scripts are already gone can no longer corrupt a framework payload, and
+        // injecting afterwards keeps our own script. The copy saved to disk above
+        // is deliberately the unstripped original.
+        let newBody = stripsScripts(mode) ? stripScripts(body) : body;
+        newBody = replaceAllPatterns(newBody, replacements) ?? newBody;
         newBody = await injectHeaderAndScript(newBody, { ...session, sessionId }, sessions, injectedJs, mode);
 
         const responseHeaders = new Headers();
         responseHeaders.set(`content-type`, `text/html; charset=utf-8`);
-        responseHeaders.set(`x-load-mode`, `magicurl`);
+        responseHeaders.set(`x-load-mode`, mode);
         responseHeaders.delete(`content-security-policy`);
         responseHeaders.delete(`content-security-policy-report-only`);
         responseHeaders.delete(`x-frame-options`);
@@ -530,7 +535,7 @@ server.all(`*`, async (c) => {
         const errorBody = await injectHeaderAndScript(html, { ...session, sessionId }, sessions, injectedJs, mode);
         const responseHeaders = new Headers();
         responseHeaders.set(`content-type`, `text/html; charset=utf-8`);
-        responseHeaders.set(`x-load-mode`, `magicurl`);
+        responseHeaders.set(`x-load-mode`, mode);
         if (challenged) responseHeaders.set(`x-magicurl-challenge`, `cloudflare`);
         return new Response(errorBody, { status: challenged ? 200 : 502, headers: responseHeaders });
       }

@@ -24,8 +24,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - `realUrlToWrapped` / `wrappedUrlToReal` handle this encoding on both server and client.
 3. For proxied HTML responses, the server:
    - Replaces every occurrence of `baseUrl` in the body with the wrapped subdomain form (so all internal links stay within the proxy).
-   - Injects the `<Header>` Preact component (SSR) after `<body>`.
-   - Injects `src/injected.js` before `</head>` to intercept client-side navigation (pushState/replaceState/popstate) and report it to `POST /__client-nav`.
+   - Injects a single `<script>` after `<body>` carrying `src/anchor.js`, `src/injected.js`, and the
+     SSR'd `<Header>` markup *as a string*, to intercept client-side navigation
+     (pushState/replaceState/popstate) and report it to `POST /__client-nav`.
+   - The header is **not** served as markup. It is mounted from JS on `load`, into a
+     `#web-syncr-root` wrapper appended to `<html>`, and re-checked on an interval so a
+     client-side route change that drops it heals itself. This is deliberate: sites that hydrate
+     React over the served HTML (Next.js App Router hydrates the whole document) reconcile
+     `<body>`'s children positionally, so an injected *element* is a hydration mismatch and React
+     deletes it — an injected `<script>` is tolerated. For the same reason, content offset uses
+     `body` padding-top rather than a spacer element. See `injectHeaderAndScript` in `rewrite.ts`.
 4. Non-HTML resources (JS, favicon, robots.txt, .well-known) bypass injection via `ignoreProxy`.
 
 ### Load modes
@@ -35,8 +43,18 @@ Each session has a `mode` (set via the Header dropdown or `POST /__session-mode`
 - **`proxy`** (default): Live streaming proxy — passes requests through to upstream.
 - **`magicurl`**: Headless-browser rendering backend — uses the magicurl service to render pages
   through a real Camoufox/Playwright browser, solving JS-heavy SPA challenges and anti-bot walls.
+- **`magicurl-noscript`**: Same render, but every `<script>` is stripped from the snapshot before
+  rewriting and injection. For sites whose own JS fights the proxy: re-running a framework against
+  HTML we have rewritten can corrupt its payload (a Next.js RSC flight payload embeds
+  byte-length-prefixed rows, so lengthening a URL inside one desyncs it and trips the site's error
+  boundary). Non-default — reach for it only when a page actually misbehaves, since it also disables
+  any site feature that genuinely needs scripts. Safe only for magicurl: a *proxy*-mode page's DOM
+  is not yet assembled, so stripping scripts there leaves any streaming/SPA site blank.
 
-When `magicurl` mode is active:
+Use `usesMagicurl(mode)` / `stripsScripts(mode)` from `config.ts` rather than comparing mode
+literals, so the two magicurl variants stay in step.
+
+When either `magicurl` mode is active:
 - Page navigations go through `src/magicurl.ts` → `POST /sessions/:id/fetch` → disk mount.
 - Asset requests try the magicurl disk mount first (`lookupAsset` + `streamAsset`), then fall
   back to the live proxy with a `MAGICURL MISS` warning.

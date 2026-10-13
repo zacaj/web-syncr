@@ -4,6 +4,32 @@ import { Header } from "./Header";
 import { readSessionConfig, type LoadMode, type Session } from "./config";
 
 /**
+ * Remove every `<script>` from an HTML document.
+ *
+ * Only ever applied to a magicurl snapshot (a DOM that is already rendered), and
+ * always *before* `injectHeaderAndScript`, so our own injected script survives.
+ * See `LoadMode` for why this is unsafe on a live proxied page.
+ */
+export function stripScripts(body: string): string {
+  return body
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ``)
+    // Self-closing / unterminated tags left over after the paired pass.
+    .replace(/<script\b[^>]*\/?>/gi, ``);
+}
+
+/**
+ * Embed a string in an inline `<script>` safely.
+ *
+ * `JSON.stringify` alone is not enough: it leaves `</script>` intact, and the
+ * HTML parser ends the script block at that byte sequence regardless of JS
+ * string context. The header markup carries raw JS event-handler attributes, so
+ * this is a real possibility rather than a theoretical one.
+ */
+function jsString(s: string): string {
+  return JSON.stringify(s).replace(/<\//g, `<\\/`);
+}
+
+/**
  * Replace every occurrence of each key in `replacements` with its value.
  *
  * Single forward pass: we collect output slices into an array and `join` once at
@@ -75,7 +101,43 @@ export async function injectHeaderAndScript(
   body = body.replace(/<meta[^>]+http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi, ``);
   // Regex matches <body ...> accounting for quoted attributes that may contain special chars
   const bodyOpenRegex = /(<body(?:[^>"']|"[^"]*"|'[^']*')*>)/i;
-  const suffix = `<script>window.__webSyncrMode=${JSON.stringify(mode)};window.__webSyncrSyncMode=${JSON.stringify(syncMode)};` + anchorJs + injectedJs + `</script>` + headerHtml + `<div id="web-syncr-spacer" style="height:4rem"></div>`;
+  // The header is deliberately NOT emitted as markup here.
+  //
+  // Sites that hydrate React over the served HTML (Next.js App Router hydrates
+  // the whole document) reconcile <body>'s children *positionally*, so any
+  // element we inject is a mismatch: React throws a hydration error and deletes
+  // our nodes — the header would vanish on every such site. An injected
+  // <script> is tolerated, so we ship the markup as a string and mount it from
+  // JS after hydration has finished.
+  //
+  // Three details matter:
+  //  - mount on `load`, not at parse time, so hydration is already done;
+  //  - append the host to <html> rather than <body>, keeping it clear of the
+  //    children React reconciles (but still in the light DOM, so anchor.js's
+  //    `getElementById('web-syncr-header')` and injected.js's pill lookups keep
+  //    working — a shadow root would break both);
+  //  - re-check on an interval, so a client-side route change or framework
+  //    re-render that drops the host heals itself.
+  // Content offset is body padding rather than a spacer element, for the same
+  // "no extra <body> children" reason.
+  const mountJs = `
+(function(){
+  var HTML = ${jsString(headerHtml)};
+  function mount(){
+    if (document.getElementById('web-syncr-root')) return;
+    var host = document.createElement('div');
+    host.id = 'web-syncr-root';
+    host.innerHTML = HTML;
+    document.documentElement.appendChild(host);
+    try { document.body.style.paddingTop = '4rem' } catch (e) { /* no body yet */ }
+  }
+  function start(){ mount(); setInterval(mount, 1000) }
+  if (document.readyState === 'complete') start();
+  else addEventListener('load', start);
+})();
+`;
+  const suffix = `<script>window.__webSyncrMode=${JSON.stringify(mode)};window.__webSyncrSyncMode=${JSON.stringify(syncMode)};`
+    + mountJs + anchorJs + injectedJs + `</script>`;
   // Replacer must be a function, not a string: a string replacer treats `$1`, `$&`,
   // `` $` ``, `$'` etc as backreference tokens, and injectedJs/headerHtml/the page's
   // own body tag can easily contain a literal "$" followed by a digit (injected.js's

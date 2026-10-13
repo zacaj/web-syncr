@@ -33,7 +33,35 @@ export const env = {
   ...process.env,
 };
 
-export type LoadMode = `proxy` | `magicurl`;
+/**
+ * How a page is fetched and served.
+ * - `proxy`             — live streaming proxy.
+ * - `magicurl`          — headless-browser render, served with the page's own scripts intact.
+ * - `magicurl-noscript` — same render, but every `<script>` is stripped from the snapshot.
+ *
+ * `magicurl-noscript` exists for sites whose client-side JS actively fights the
+ * proxy. A magicurl snapshot is already a fully-rendered DOM, so its scripts are
+ * pure liability: re-running them re-hydrates a framework against HTML we have
+ * rewritten, which can corrupt framework payloads (a Next.js RSC flight payload
+ * embeds byte-length-prefixed rows, so lengthening a URL inside one desyncs it
+ * and trips the site's error boundary) and can delete our injected header.
+ *
+ * It is deliberately NOT the default, and deliberately not offered for `proxy`
+ * mode: proxy mode serves HTML whose DOM is not yet assembled, so for any site
+ * that streams content (React Suspense, any SPA) stripping scripts leaves a
+ * blank page. Only a post-render snapshot is safe to strip.
+ */
+export type LoadMode = `proxy` | `magicurl` | `magicurl-noscript`;
+
+/** True for every mode served by the magicurl rendering backend. */
+export function usesMagicurl(mode: LoadMode): boolean {
+  return mode === `magicurl` || mode === `magicurl-noscript`;
+}
+
+/** True when the rendered snapshot should be served with all `<script>`s removed. */
+export function stripsScripts(mode: LoadMode): boolean {
+  return mode === `magicurl-noscript`;
+}
 
 /** Build the path to a session's config JSON file (mode + magicurl session ID) */
 export function sessionConfigPath(sessionId: string) {

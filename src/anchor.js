@@ -20,7 +20,8 @@
  */
 (function() {
   const HEADER_ID = `web-syncr-header`;
-  const SPACER_ID = `web-syncr-spacer`;
+  // Wrapper that injected.js mounts the header into, appended to <html>.
+  const ROOT_ID = `web-syncr-root`;
 
   // How far down the *usable* viewport (below the injected header) the reading
   // line sits. A third, not the centre: people read top-down, so the middle of
@@ -48,9 +49,13 @@
 
   /**
    * Live height of the injected header. Deliberately measured rather than
-   * assuming the 4rem of #web-syncr-spacer: the header is `position: fixed` and
-   * wraps to multiple rows on a narrow viewport, so on a phone its real height
-   * exceeds the spacer's.
+   * assuming the 4rem of body padding-top that the mount applies: the header is
+   * `position: fixed` and wraps to multiple rows on a narrow viewport, so on a
+   * phone its real height exceeds that padding.
+   *
+   * Returns 0 until the header is mounted, which now happens on `load` rather
+   * than at parse time (see rewrite.ts) — callers only use this for scroll
+   * offset maths, where a brief 0 is harmless.
    */
   function headerHeight() {
     const el = document.getElementById(HEADER_ID);
@@ -96,7 +101,7 @@
     let cur = el;
     let depth = 0;
     while (cur && cur.nodeType === 1 && depth++ < 40) {
-      if (cur.id === HEADER_ID || cur.id === SPACER_ID) return true;
+      if (cur.id === HEADER_ID || cur.id === ROOT_ID) return true;
       if (EXCLUDED_TAGS.has(cur.tagName)) return true;
       const role = cur.getAttribute && cur.getAttribute(`role`);
       if (role && EXCLUDED_ROLES.has(role)) return true;

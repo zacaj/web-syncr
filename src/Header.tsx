@@ -64,8 +64,12 @@ export function Header({ session, history, mode, syncMode = `off` }: {
       data-sid={session.sessionId}
       onChange={`setSessionMode(this.dataset.sid, this.value)` as Hack}
     >
-      <option value="proxy">proxy</option>
-      <option value="magicurl">magicurl</option>
+      <option value="proxy" selected={mode === `proxy` ? true : undefined}>proxy</option>
+      <option value="magicurl" selected={mode === `magicurl` ? true : undefined}>magicurl</option>
+      {/* For sites whose own JS breaks the proxy — see LoadMode in config.ts.
+          Non-default: only worth reaching for when a page actually misbehaves,
+          since it also disables any site feature that genuinely needs scripts. */}
+      <option value="magicurl-noscript" selected={mode === `magicurl-noscript` ? true : undefined}>magicurl (no scripts)</option>
     </select>
 
     {/* Reading-position sync. The pill is the sole indicator+action for "the
