@@ -1,5 +1,6 @@
-ARG NODE_VERSION=24-slim
-FROM node:${NODE_VERSION} AS base
+# Keep NODE_VERSION in sync with .nvmrc (major only; patch releases come from rebuilding with --pull).
+ARG NODE_VERSION=24
+FROM node:${NODE_VERSION}-slim AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
