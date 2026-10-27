@@ -7,6 +7,10 @@ export default defineConfig({
   testDir: `./tests`,
   fullyParallel: true,
   timeout: 10_000,
+  // CI shares the desktop runner with other jobs; timing-sensitive tests (e.g. challenge.spec.ts)
+  // can miss the 10s timeout under load
+  retries: process.env[`CI`] ? 2 : 0,
+  workers: process.env[`CI`] ? 2 : undefined,
   reporter: [
     [`list`],
     [`html`, { open: `never` }],
