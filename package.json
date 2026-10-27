@@ -28,7 +28,9 @@
     "docker:set-tag": "ssh -C zacaj@git.zacaj.com -p 1022 \"sed -E \\\"s/(\\/web-syncr:).*/\\1$DTV/\\\" -i.bak /home/zacaj/web-syncr/docker-compose.yml\"",
     "docker:compose": "ssh -C zacaj@git.zacaj.com -p 1022 'cd /home/zacaj/web-syncr && docker compose up -d --force-recreate --pull always'",
     "docker:deploy": "pnpm docker:build && pnpm docker:tag:push_registry && pnpm docker:set-tag && pnpm docker:compose",
-    "publ": "bash scripts/publish.sh",
+    "release:patch": "release-it --ci --verbose -i patch",
+    "release:minor": "release-it --ci --verbose -i minor",
+    "publ": "release-it --ci --verbose -i",
     "deploy:dev": "bash scripts/deploy-dev.sh",
     "deploy": "bash scripts/deploy-version.sh"
   },
@@ -68,6 +70,7 @@
     "@typescript/lib-esnext": "npm:@better-typescript-lib/esnext@^2.12.0",
     "@typescript/lib-scripthost": "npm:@better-typescript-lib/scripthost@^2.12.0",
     "@typescript/lib-webworker": "npm:@better-typescript-lib/webworker@^2.12.0",
+    "release-it": "^20.2.0",
     "tsx": "^4",
     "typescript": "^5.9",
 

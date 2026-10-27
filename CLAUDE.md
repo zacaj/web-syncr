@@ -7,7 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `pnpm start` — Run dev server (requires HTTPS certs configured in `.env`)
 - `pnpm typecheck` — TypeScript type-check only (no emit in dev; production emits to `build/`)
 - `pnpm docker:start` — Build and run dev Docker image
-- `pnpm docker:deploy` — Build, tag, push to registry, and restart via SSH on remote host
+- `pnpm docker:deploy` — Build, tag, push to registry, and restart via SSH on remote host (manual/dev; releases go through CI)
+- `pnpm release:patch` / `release:minor` — release-it bumps the version and pushes a `vX.Y.Z` tag;
+  Forgejo CI (`.forgejo/workflows/ci.yml`) then tests, builds + pushes `docker.zacaj.com/web-syncr:<version>`
+  (the `dev` stage), and deploys it to the VPS (health-checked, rolls back on failure). The `npmrc`
+  build secret (token for `@zacaj/*`) comes from `~/.npmrc` via `.zdockerrc` locally, `NPM_TOKEN` in CI.
 
 - `pnpm test` — Run the Playwright E2E test suite (`tests/`)
 - `LIVE_TESTS=1 pnpm test tests/live-sites.spec.ts` — Opt-in live-site regression tests (require internet + HTTPS certs)

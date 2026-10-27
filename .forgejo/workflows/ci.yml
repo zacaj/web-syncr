@@ -1,0 +1,137 @@
+# Runs on the desktop forgejo-runner (~/bin/forgejo-runner): typecheck and Playwright on main and
+# every PR; on a release tag (vX.Y.Z, created by release-it) also builds the image, pushes
+# docker.zacaj.com/$APP:<version>, and deploys it to the VPS. "Run workflow" (manual dispatch)
+# with a version only deploys -- for re-deploys/rollbacks of an already-published image.
+#
+# Secrets (user-level on git.zacaj.com): NPM_TOKEN (npm.zacaj.com, for @zacaj/*),
+# REGISTRY_USER / REGISTRY_PASSWORD (docker.zacaj.com), DEPLOY_SSH_KEY (key restricted on the
+# VPS to ~/ci-deploy/ci-deploy.sh: `deploy <app> <version>`, which health-checks + rolls back).
+# Branch protection on main + the `ci` topic are added by zacaj/renovate's bootstrap-repos.mjs,
+# which expects this workflow to be named `ci` with a `test` job.
+name: ci
+
+on:
+  push:
+    # other branches get CI via their PR (pull_request below) -- a branch push would otherwise run
+    # the same tests twice for every PR, e.g. each Renovate update
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Already-published version to deploy (e.g. 7.3.2)"
+        required: true
+        type: string # Forgejo has no default input type (unlike GitHub)
+
+env:
+  APP: web-syncr # image docker.zacaj.com/$APP, VPS dir ~/$APP
+  # the image the VPS runs is the `dev` stage (tsx on the sources); `prod` needs a build script
+  # this project doesn't have
+  BUILD_TARGET: dev
+
+jobs:
+  test:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Private registry auth
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: echo "//npm.zacaj.com/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+
+      - run: npm i -g pnpm@11
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+      # the test server is HTTPS-only and reads cert paths from env (locally: the real certs in
+      # .env, which CI doesn't have); the tests use ignoreHTTPSErrors, so a throwaway cert is fine
+      - name: Self-signed cert for the test server
+        run: |
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+            -keyout /tmp/test-key.pem -out /tmp/test-cert.pem 2>/dev/null
+          echo "httpsKey=/tmp/test-key.pem" >> "$GITHUB_ENV"
+          echo "httpsCert=/tmp/test-cert.pem" >> "$GITHUB_ENV"
+
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test
+        env:
+          CI: "true"
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+  publish:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag v$tag does not match package.json version $pkg" >&2
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Registry login
+        env:
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: echo "$REGISTRY_PASSWORD" | docker login docker.zacaj.com -u "$REGISTRY_USER" --password-stdin
+
+      # Same labels zdocker stamps (see ~/bin/zbin/zdocker _set_label_args), so the VPS-side
+      # checks can treat CI and hand-built images alike.
+      - name: Build and push
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          npmrc="$(mktemp)"
+          trap 'rm -f "$npmrc"' EXIT
+          echo "//npm.zacaj.com/:_authToken=${NPM_TOKEN}" > "$npmrc"
+          image="docker.zacaj.com/${APP}:${VERSION}"
+          docker build --target "$BUILD_TARGET" --pull \
+            --secret "id=npmrc,src=${npmrc}" \
+            --label "org.opencontainers.image.created=$(date -Iseconds)" \
+            --label "org.opencontainers.image.version=${VERSION}" \
+            --label "org.opencontainers.image.revision=$(git rev-parse --short HEAD)" \
+            --label "com.zacaj.base-version=${VERSION}" \
+            --label "com.zacaj.git-dirty=false" \
+            -t "$image" .
+          docker push "$image"
+
+  deploy:
+    needs: publish
+    # needs: is skipped on manual dispatch, so don't let that skip this job too
+    if: >-
+      !failure() && !cancelled() &&
+      (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+    runs-on: docker
+    steps:
+      - name: Deploy to VPS
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          # pinned VPS host key (ssh-keyscan -p 1022 -t ed25519 git.zacaj.com)
+          echo '[git.zacaj.com]:1022 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKuhSJj85do51ktgUnLUhgLgtLfvXX5bDjextdrkrmZ6' > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -p 1022 zacaj@git.zacaj.com deploy "$APP" "${VERSION#v}"

@@ -23,7 +23,6 @@ gitignore
 Thumbs.db
 
 .env
-.npmrc
 
 # custom
 build/

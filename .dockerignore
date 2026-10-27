@@ -7,3 +7,10 @@ build
 db
 .kilo
 .pnpm-store
+# secrets/config are runtime-only (compose env_file); never bake them into the image
+.env
+.env.*
+# test-only
+tests
+playwright-report
+test-results

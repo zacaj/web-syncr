@@ -1,0 +1,6 @@
+# Config for zdocker (~/bin/zbin/zdocker) -- see `zdocker help`.
+
+# @zacaj/* packages are on a private registry; the project's own .npmrc only maps the registry,
+# not an auth token (never committed). This mounts your own ~/.npmrc as a build secret so
+# `pnpm install` can authenticate during `zdocker build`/`publish`/etc. See DOCKER.md.
+ZDOCKER_BUILD_SECRETS="id=npmrc,src=${HOME}/.npmrc"
