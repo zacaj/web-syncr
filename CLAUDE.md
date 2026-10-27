@@ -60,6 +60,14 @@ When either `magicurl` mode is active:
   back to the live proxy with a `MAGICURL MISS` warning.
 - If the magicurl API is unreachable, the entire request falls back to the live proxy.
 
+Bot-challenge pages (`ChallengePage.tsx`) embed magicurl's noVNC via `src/vnc-proxy.ts`: web-syncr
+serves it on its own https origin at `/__vnc/<token>/…` (HTTP + websocket `upgrade`), so it isn't
+blocked as mixed content and works off Tailscale. The token is per challenge attempt, expires after
+`vncTokenTtlMs` of disuse, and is revoked (open sockets closed) once the session gets past the
+challenge — it is the only protection, so never log or persist it. Checking a challenge is manual
+(Check Now → forced re-render); challenge pages only *poll* the cached result and never re-render on
+their own, because re-rendering an unsolved page makes magicurl close the page being solved in VNC.
+
 Config options (`.env`):
 - `magicurlApi` — REST API base URL for the magicurl service (default: `http://host.docker.internal:3005`)
 - `magicurlMount` — Read-only bind mount path for magicurl's `/data/fetches` (default: `/magicurl-data`)

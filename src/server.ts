@@ -18,9 +18,10 @@ import { ChallengePage } from "./ChallengePage";
 import { env, readSessionConfig, stripsScripts, usesMagicurl, writeSessionConfig, type Anchor, type LoadMode, type Session, type SessionHead, type SyncMode } from "./config";
 import { flushLiveState, getLiveState, publishLiveState } from "./session-state";
 import { Home } from "./Home";
-import { detectUnresolvedChallenge, getDomHtml, isChallengeTimeout, lookupAsset, renderPage, streamAsset, vncUrl } from './magicurl';
+import { challengeOf, challengeStatus, checkChallenge, getDomHtml, isChallengeTimeout, lookupAsset, renderPage, streamAsset, vncUrl } from './magicurl';
 import { injectHeaderAndScript, replaceAllPatterns, stripScripts } from "./rewrite";
 import { parseSubdomain, realUrlToWrapped, wrappedUrlToReal } from "./urls";
+import { mintVncUrl, revokeVncTokens, VNC_PREFIX, vncHttp, vncUpgrade } from "./vnc-proxy";
 import { startWatchdog } from "./watchdog";
 
 export { realUrlToWrapped };
@@ -220,17 +221,30 @@ server.post(`/__client-nav`, async (c) => {
   return c.json({ ok: true, session });
 });
 
+// noVNC for the challenge page, behind a per-attempt token (see vnc-proxy.ts).
+server.all(`${VNC_PREFIX}*`, c => vncHttp(c.req.raw));
+
 server.get(`/__poll-challenge`, async c => {
   const sessionId = c.req.query(`sessionId`);
   const url = c.req.query(`url`);
   if (!sessionId || !url) return c.json({ error: `missing params` }, 400);
-  try {
-    const result = await renderPage(sessionId, url, { force: false });
-    return c.json({ pending: result.challengePending ?? false });
-  } catch (err) {
-    console.warn(`Error while polling for challenge update on sessionId=${sessionId}: `, err);
-    return c.json({ pending: true, error: err instanceof Error ? err.message : String(err) });
+  // `force` (the Check Now button) re-renders, which is the only way to learn
+  // whether a solve in VNC actually worked. The periodic auto-check must not:
+  // each fresh render of a still-challenged page closes the VNC page the user
+  // may be mid-solve on (possibly from another device). It only reads the cache,
+  // which catches a re-render done by Check Now on any device.
+  if (c.req.query(`force`) !== `1`) {
+    try {
+      const status = await challengeStatus(sessionId, url);
+      if (!status.pending) revokeVncTokens(sessionId);
+      return c.json(status);
+    } catch (err) {
+      return c.json({ pending: true, error: err instanceof Error ? err.message : String(err) });
+    }
   }
+  const result = await checkChallenge(sessionId, url);
+  if (!result.pending) revokeVncTokens(sessionId);
+  return c.json(result, result.error ? 502 : 200);
 });
 
 server.post(`/__session-mode`, async c => {
@@ -417,40 +431,27 @@ server.all(`*`, async (c) => {
         // Page navigation: render through magicurl
         const result = await renderPage(sessionId, realUrl, { force: !!isRefresh });
 
-        // New API: challenge returns immediately with challengePending: true + vnc link
-        const pendingChallenge = result.challengePending ? (result.challengeName ?? `unknown`) : null;
-        if (pendingChallenge) {
+        // challengePending (magicurl returned early with a VNC link), or a DOM
+        // that is still an interstitial (a challenge magicurl didn't flag).
+        const challenge = await challengeOf(result);
+        if (challenge) {
           console.warn(
-            `MAGICURL CHALLENGE PENDING (${pendingChallenge}): ${realUrl} — returning interactive challenge page`,
+            `MAGICURL CHALLENGE (${challenge}): ${realUrl} status=${result.status} pending=${result.challengePending ?? false} `
+            + `warnings=${JSON.stringify(result.warnings ?? [])} — returning interactive challenge page`,
           );
           const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
-          const challengeHtml = await renderToStringAsync(ChallengePage({ challengeName: pendingChallenge, realUrl, sessionId, vnc: result.vnc ?? vncUrl() }));
+          const challengeHtml = await renderToStringAsync(ChallengePage({ challengeName: challenge, realUrl, sessionId, vnc: mintVncUrl(sessionId, result.vnc ?? vncUrl()) }));
           const challengeBody = await injectHeaderAndScript(challengeHtml, { ...session, sessionId }, sessions, injectedJs, mode);
           const responseHeaders = new Headers();
           responseHeaders.set(`content-type`, `text/html; charset=utf-8`);
           responseHeaders.set(`x-load-mode`, mode);
-          responseHeaders.set(`x-magicurl-challenge`, pendingChallenge);
+          responseHeaders.set(`x-magicurl-challenge`, challenge);
           return new Response(challengeBody, { status: 200, headers: responseHeaders });
         }
 
+        // Past the challenge: nothing left to solve, so no VNC link should stay live.
+        revokeVncTokens(sessionId);
         const body = await getDomHtml(result.fetchId);
-
-        // Fallback: DOM-based detection for older API versions that don't set challengePending
-        const legacyChallenge = detectUnresolvedChallenge(result, body);
-        if (legacyChallenge) {
-          console.warn(
-            `MAGICURL CHALLENGE (${legacyChallenge}): ${realUrl} status=${result.status} `
-            + `warnings=${JSON.stringify(result.warnings ?? [])} — interstitial not resolved`,
-          );
-          const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
-          const challengeHtml = await renderToStringAsync(ChallengePage({ challengeName: legacyChallenge, realUrl, sessionId, vnc: vncUrl() }));
-          const challengeBody = await injectHeaderAndScript(challengeHtml, { ...session, sessionId }, sessions, injectedJs, mode);
-          const responseHeaders = new Headers();
-          responseHeaders.set(`content-type`, `text/html; charset=utf-8`);
-          responseHeaders.set(`x-load-mode`, mode);
-          responseHeaders.set(`x-magicurl-challenge`, legacyChallenge);
-          return new Response(challengeBody, { status: 200, headers: responseHeaders });
-        }
 
         try {
           let savePath = Path.join(`${env.dbPath}/session_${sessionId}`, new URL(realUrl).pathname);
@@ -525,7 +526,7 @@ server.all(`*`, async (c) => {
         );
         const injectedJs = readFileSync(`./src/injected.js`, `utf8`);
         const html = challenged
-          ? await renderToStringAsync(ChallengePage({ challengeName: `cloudflare`, realUrl, sessionId, vnc: vncUrl() }))
+          ? await renderToStringAsync(ChallengePage({ challengeName: `cloudflare`, realUrl, sessionId, vnc: mintVncUrl(sessionId, vncUrl()) }))
           : `<html><head><title>Magicurl Error</title></head><body>`
             + `<h1>Magicurl failed to load this page</h1>`
             + `<pre>${msg.replace(/</g, `&lt;`)}</pre>`
@@ -633,7 +634,7 @@ server.all(`*`, async (c) => {
   return originalResponse;
 });
 
-serve({
+const httpsServer = serve({
   fetch: server.fetch,
   createServer,
   port: env.localPort,
@@ -658,6 +659,8 @@ serve({
 // the unpredictable crash the live-state debounce is sized for. Without this,
 // any reading position published in the last couple seconds before a deploy
 // never reaches disk, and the fresh process comes up with nothing to restore.
+httpsServer.on(`upgrade`, vncUpgrade);
+
 for (const sig of [`SIGTERM`, `SIGINT`] as const) {
   process.on(sig, () => {
     flushLiveState();

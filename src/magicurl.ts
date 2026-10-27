@@ -222,7 +222,63 @@ export async function ensureSession(webSessionId: string): Promise<string> {
 }
 
 /**
- * Render a page through magicurl. Reuses cached fetchId when !force.
+ * The session's last fetch for `realUrl`, without rendering anything — or null
+ * when there is none (different URL, or a fetch magicurl never wrote a manifest
+ * for, which is what a challenge that errored out leaves behind).
+ */
+async function cachedFetch(webSessionId: string, realUrl: string): Promise<FetchResult | null> {
+  const cfg = readSessionConfig(webSessionId);
+  if (!cfg.lastFetchId || cfg._lastUrl !== realUrl) return null;
+  try {
+    return await loadManifest(cfg.lastFetchId);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The bot-challenge a fetch is stuck on, or null if it rendered the real page.
+ * `challengePending` is magicurl's own signal; the DOM check covers a
+ * challenge that resolved to an interstitial without magicurl noticing.
+ */
+export async function challengeOf(result: FetchResult): Promise<string | null> {
+  if (result.challengePending) return result.challengeName ?? `unknown`;
+  return detectUnresolvedChallenge(result, await getDomHtml(result.fetchId));
+}
+
+/**
+ * Cheap challenge-page poll: is the session's last fetch of `realUrl` still a
+ * challenge? Never renders, so it can't disturb a solve in progress in VNC —
+ * it only notices once *something* (this tab's Check Now, another device's,
+ * a reload) has re-rendered past the challenge.
+ */
+export async function challengeStatus(webSessionId: string, realUrl: string): Promise<{ pending: boolean; checking: boolean }> {
+  const cached = await cachedFetch(webSessionId, realUrl);
+  return { pending: !cached || !!await challengeOf(cached), checking: isRendering(webSessionId) };
+}
+
+/** In-flight renders, so concurrent requests for one session share a render instead of stacking them. */
+const inFlight = new Map<string, { realUrl: string; promise: Promise<FetchResult> }>();
+
+/** Whether a render is running for this session right now (e.g. an automatic challenge check). */
+export function isRendering(webSessionId: string): boolean {
+  return inFlight.has(webSessionId);
+}
+
+/**
+ * A render this recent is as good as a new one, even when `force` asks for
+ * fresh. Without this, the reload that follows a successful challenge check —
+ * which can look like a refresh (Referer === URL) — would immediately re-render
+ * the page that was just rendered, doubling the wait.
+ */
+const FRESH_MS = 15_000;
+
+/**
+ * Render a page through magicurl. Reuses the cached fetch when !force (or when
+ * it is under FRESH_MS old) — unless that fetch is a challenge: a cached
+ * challenge is a snapshot of a state that may well have been solved since
+ * (magicurl writes the manifest once and never updates it), so re-serving it
+ * would pin the page on the challenge forever.
  * Returns a FetchResult (which also serves as the manifest handle).
  */
 export async function renderPage(
@@ -230,14 +286,40 @@ export async function renderPage(
   realUrl: string,
   { force = false }: { force?: boolean } = {},
 ): Promise<FetchResult> {
-  const magicSessionId = await ensureSession(webSessionId);
-  const cfg = readSessionConfig(webSessionId);
+  const cached = await cachedFetch(webSessionId, realUrl);
+  const fresh = cached && Date.now() - Date.parse(cached.finishedAt) < FRESH_MS;
+  if (cached && (!force || fresh) && !await challengeOf(cached)) return cached;
 
-  // Reuse cached fetchId if not forcing a re-render
-  if (!force && cfg.lastFetchId && cfg._lastUrl === realUrl) {
-    const cached = await apiGet<FetchResult>(`/fetches/${cfg.lastFetchId}`);
-    return cached;
+  // Every fresh render of a challenged page closes magicurl's previous
+  // pending-solve page (the one shown in VNC), so two at once — a double
+  // click, or two devices checking together — would fight each other.
+  const running = inFlight.get(webSessionId);
+  if (running?.realUrl === realUrl) return running.promise;
+  const promise = freshRender(webSessionId, realUrl).finally(() => {
+    if (inFlight.get(webSessionId)?.promise === promise) inFlight.delete(webSessionId);
+  });
+  inFlight.set(webSessionId, { realUrl, promise });
+  return promise;
+}
+
+/**
+ * Re-render a challenged page to find out whether it has been solved. The
+ * only real test: magicurl never updates a challenged fetch after the fact.
+ * Costs a full render, and if still unsolved, replaces the page in VNC.
+ */
+export async function checkChallenge(webSessionId: string, realUrl: string): Promise<{ pending: boolean; challenge?: string | null; error?: string }> {
+  try {
+    const challenge = await challengeOf(await renderPage(webSessionId, realUrl, { force: true }));
+    return { pending: !!challenge, challenge };
+  } catch (err) {
+    if (isChallengeTimeout(err)) return { pending: true, challenge: `cloudflare` };
+    console.warn(`Error while checking challenge on sessionId=${webSessionId}: `, err);
+    return { pending: true, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+async function freshRender(webSessionId: string, realUrl: string): Promise<FetchResult> {
+  const magicSessionId = await ensureSession(webSessionId);
 
   const timeoutMs = Number(env.magicurlTimeoutMs) || 30000;
   console.info(`[${ts()}] magicurl render: [${webSessionId}] magic=${magicSessionId} url=${realUrl} timeout=${timeoutMs}ms`);
@@ -252,9 +334,11 @@ export async function renderPage(
   }, timeoutMs + 15_000);
   console.info(`[${ts()}] magicurl render done: [${webSessionId}] status=${result.status} fetchId=${result.fetchId} challenge=${result.challengePending ?? false}`);
 
-  // Always write lastFetchId so the challenge poll (force: false) can reuse it
-  // without triggering another render.
-  writeSessionConfig(webSessionId, { ...cfg, lastFetchId: result.fetchId, _lastUrl: realUrl });
+  // Always write lastFetchId so the challenge poll (challengeStatus) can see it
+  // without triggering another render. Re-read rather than reuse a config read
+  // before the render: that copy is up to timeoutMs stale, and writing it back
+  // would revert a mode change made while the render ran.
+  writeSessionConfig(webSessionId, { ...readSessionConfig(webSessionId), lastFetchId: result.fetchId, _lastUrl: realUrl });
   return result;
 }
 
@@ -277,12 +361,12 @@ export function detectUnresolvedChallenge(result: FetchResult, dom: string): str
 }
 
 /**
- * The human-in-the-loop VNC entry point on the magicurl service. The `/vnc`
- * route redirects to the noVNC web client so a human can solve an interactive
- * captcha in the live browser, after which the fetch can be re-issued.
+ * magicurl's noVNC client, for when a fetch result doesn't carry its own `vnc`
+ * link. Same host as the API, on websockify's port — what camoufetch's `/vnc`
+ * route redirects to, but named directly so it can be proxied (see vnc-proxy.ts).
  */
 export function vncUrl(): string {
-  return `${API}/vnc`;
+  return `http://${new URL(API).hostname}:6080/vnc.html`;
 }
 
 /**

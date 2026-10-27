@@ -86,6 +86,49 @@ function wrapAndNavigate(realUrl, sessionId) {
   }
 };
 
+/**
+ * A navigation nobody at this device asked for (live sync following another
+ * device) must not stop on the site's "Leave site?" prompt: nobody is here to
+ * answer it, and each further sync poll would queue another one behind it.
+ * The user's own navigations keep the prompt.
+ *
+ * Two layers, since the site's handler may be registered before or after us:
+ * a capture listener on window runs ahead of every non-capture listener and the
+ * `onbeforeunload` property (at-target capture-first ordering), and stops them;
+ * neutering `preventDefault`/`returnValue` covers one registered with capture
+ * before this script ran. Both are inert until `suppressUnloadPrompt` is set,
+ * which only happens right before a sync-driven navigation.
+ */
+let suppressUnloadPrompt = false;
+addEventListener(`beforeunload`, e => { if (suppressUnloadPrompt) e.stopImmediatePropagation() }, true);
+(function() {
+  const proto = window.BeforeUnloadEvent && BeforeUnloadEvent.prototype;
+  if (!proto) return;
+  const origPreventDefault = Event.prototype.preventDefault;
+  proto.preventDefault = function() { if (!suppressUnloadPrompt) origPreventDefault.call(this) };
+  const desc = Object.getOwnPropertyDescriptor(proto, `returnValue`);
+  if (desc && desc.set) {
+    Object.defineProperty(proto, `returnValue`, {
+      ...desc,
+      set(v) { if (!suppressUnloadPrompt) desc.set.call(this, v) },
+    });
+  }
+})();
+
+let pendingSyncNav = null;
+function syncNavigate(realUrl, sessionId) {
+  // Polls keep arriving while the next page loads (2s apart, and a magicurl
+  // render can take far longer); re-assigning the same URL each time restarts
+  // the load and, on a prompting page, stacks the prompts.
+  if (pendingSyncNav === realUrl) return;
+  pendingSyncNav = realUrl;
+  suppressUnloadPrompt = true;
+  window.onbeforeunload = null;
+  wrapAndNavigate(realUrl, sessionId);
+}
+// Back from the bfcache this page is live again, with no navigation pending.
+addEventListener(`pageshow`, e => { if (e.persisted) { pendingSyncNav = null; suppressUnloadPrompt = false } });
+
 const origHtml = document.documentElement.outerHTML;
 setTimeout(() => {
   if (document.documentElement.outerHTML !== origHtml)
@@ -306,14 +349,16 @@ function setSyncMode(sessionId, syncMode) {
     pill.appendChild(button);
   }
 
-  function followState(state) {
+  /** `auto`: live sync moved us, not a tap here — see syncNavigate. */
+  function followState(state, auto = false) {
     if (!state || !state.url) return;
     if (state.url === myRealUrl()) {
       const api = anchorApi();
       if (api && state.anchor) api.settleTo(state.anchor);
       return;
     }
-    wrapAndNavigate(state.url, sessionId);
+    if (auto) syncNavigate(state.url, sessionId);
+    else wrapAndNavigate(state.url, sessionId);
   }
 
   /**
@@ -329,7 +374,7 @@ function setSyncMode(sessionId, syncMode) {
       if (api && state.anchor) api.settleTo(state.anchor);
       return;
     }
-    if (syncMode === `live`) followState(state);
+    if (syncMode === `live`) followState(state, true);
     else showPill(state);
   }
 

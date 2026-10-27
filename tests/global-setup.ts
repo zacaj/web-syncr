@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -327,6 +328,9 @@ export default async function globalSetup() {
   // Mock magicurl API — returns challenge responses for testing challenge page rendering
   const MOCK_MAGICURL_FETCH_ID = `challenge_fetch`;
   const MOCK_MAGIC_SESSION_ID = `magic-challenge`;
+  const MOCK_SOLVED_FETCH_ID = `solved_fetch`;
+  const mockMagicurl = { solved: false, renders: 0, lastUpgrade: `` };
+  const mockFetches = new Map<string, unknown>();
   const mockMagicUrlServer = http.createServer((req, res) => {
     const url = new URL(req.url!, `http://localhost`);
 
@@ -337,11 +341,29 @@ export default async function globalSetup() {
       return;
     }
 
-    // POST /sessions/:id/fetch — trigger a fetch, return challenge result
-    if (url.pathname === `/sessions/${MOCK_MAGIC_SESSION_ID}/fetch` && req.method === `POST`) {
+    // Test controls: `solve` flips the challenge to solved (as a human in VNC
+    // would), `reset` restores it; `state` reports how many renders ran.
+    if (url.pathname === `/__mock/solve` || url.pathname === `/__mock/reset`) {
+      mockMagicurl.solved = url.pathname === `/__mock/solve`;
+      if (!mockMagicurl.solved) { mockMagicurl.renders = 0; mockMagicurl.lastUpgrade = `` }
       res.writeHead(200, { 'Content-Type': `application/json` });
-      res.end(JSON.stringify({
-        fetchId: MOCK_MAGICURL_FETCH_ID,
+      res.end(JSON.stringify(mockMagicurl));
+      return;
+    }
+    if (url.pathname === `/__mock/state`) {
+      res.writeHead(200, { 'Content-Type': `application/json` });
+      res.end(JSON.stringify(mockMagicurl));
+      return;
+    }
+
+    // POST /sessions/:id/fetch — trigger a fetch: a pending challenge until
+    // solved, then the real page. Like real magicurl, each result is stored
+    // once and never updated.
+    if (url.pathname === `/sessions/${MOCK_MAGIC_SESSION_ID}/fetch` && req.method === `POST`) {
+      mockMagicurl.renders++;
+      const fetchId = mockMagicurl.solved ? MOCK_SOLVED_FETCH_ID : MOCK_MAGICURL_FETCH_ID;
+      const result = {
+        fetchId,
         sessionId: MOCK_MAGIC_SESSION_ID,
         requestedUrl: `http://localhost/page2`,
         finalUrl: `http://localhost/page2`,
@@ -349,18 +371,57 @@ export default async function globalSetup() {
         startedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString(),
         durationMs: 5000,
-        challengePending: true,
-        challengeName: `cloudflare`,
-        vnc: `vnc.html?token=abc123`,
+        ...mockMagicurl.solved ? {} : {
+          challengePending: true,
+          challengeName: `cloudflare`,
+          vnc: `http://localhost:${MOCK_MAGICURL_PORT}/vnc.html?token=abc123`,
+        },
         dom: { path: `dom.html`, bytes: 0 },
         assets: [],
-        bundlePath: `/data/fetches/${MOCK_MAGICURL_FETCH_ID}`,
-      }));
+        bundlePath: `/data/fetches/${fetchId}`,
+      };
+      mockFetches.set(fetchId, result);
+      res.writeHead(200, { 'Content-Type': `application/json` });
+      res.end(JSON.stringify(result));
+      return;
+    }
+
+    // Stand-in for noVNC's static client (proxied by web-syncr under /__vnc/<token>/).
+    if (url.pathname === `/vnc.html`) {
+      res.writeHead(200, { 'Content-Type': `text/html` });
+      res.end(`<html><head><title>noVNC</title></head><body><p id="novnc">mock novnc</p></body></html>`);
+      return;
+    }
+
+    const fetchMatch = /^\/fetches\/([^/]+)(\/dom)?$/.exec(url.pathname);
+    const stored = fetchMatch && mockFetches.get(fetchMatch[1]!);
+    if (stored) {
+      if (fetchMatch[2]) {
+        res.writeHead(200, { 'Content-Type': `text/html` });
+        res.end(`<html><head><title>Solved page</title></head><body><p id="solved">real content</p></body></html>`);
+      }
+      else {
+        res.writeHead(200, { 'Content-Type': `application/json` });
+        res.end(JSON.stringify(stored));
+      }
       return;
     }
 
     res.writeHead(404, { 'Content-Type': `application/json` });
     res.end(JSON.stringify({ error: `not found` }));
+  });
+  // Stand-in for websockify: accept the handshake, send one text frame. Records
+  // the path and Host it saw so tests can check the proxy re-pathed the request.
+  mockMagicUrlServer.on(`upgrade`, (req, socket) => {
+    mockMagicurl.lastUpgrade = `${req.headers.host} ${req.url}`;
+    if (req.url !== `/websockify`) {
+      socket.end(`HTTP/1.1 404 Not Found\r\n\r\n`);
+      return;
+    }
+    const accept = createHash(`sha1`).update(`${req.headers[`sec-websocket-key`]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest(`base64`);
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    socket.write(Buffer.from([0x81, 5, ...Buffer.from(`hello`)]));
+    socket.on(`error`, () => {});
   });
   await new Promise<void>(r => mockMagicUrlServer.listen(MOCK_MAGICURL_PORT, r));
   (globalThis as Record<string, unknown>).__mockMagicUrlServer = mockMagicUrlServer;

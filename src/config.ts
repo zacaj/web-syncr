@@ -17,6 +17,9 @@ export const env = {
   // it in ~5-15s); the old 3s budget left ~0ms for challenge resolution, so the
   // challenge page was captured as-is.
   magicurlTimeoutMs: 30000,
+  // How long a challenge page's public VNC link stays valid without being used
+  // (each use renews it; solving the challenge revokes it outright).
+  vncTokenTtlMs: 15 * 60_000,
 
   // ── Safety guards (all overridable via env; set to 0 to disable) ───────────
   // Hard ceiling on a single request. A load that exceeds this returns 504

@@ -428,4 +428,45 @@ test.describe(`sync`, () => {
     expect(config.config.mode).toBe(`magicurl`);
     expect(config.config.syncMode).toBe(`manual`);
   });
+
+  test(`a live follow skips the site's "Leave site?" prompt instead of stacking one per poll`, async ({ page }) => {
+    // Regression: following another device in live mode navigated via a plain
+    // location.assign, so a page with a beforeunload handler raised its prompt
+    // — and every later 2s poll re-assigned the URL and queued another.
+    await page.setViewportSize(DESKTOP);
+    await createSession(page, `http://localhost/long-article`);
+    const sessionId = extractSessionId(page.url())!;
+    const url = page.url();
+
+    const dialogs: string[] = [];
+    page.on(`dialog`, d => { dialogs.push(d.type()); void d.accept() });
+    // A prompting page; Chrome only prompts once the user has interacted with it.
+    const makePrompting = async () => {
+      await page.evaluate(() => {
+        window.onbeforeunload = e => { e.preventDefault(); return `unsaved` };
+        addEventListener(`beforeunload`, e => { e.preventDefault(); e.returnValue = `x` });
+      });
+      await page.mouse.click(5, 300);
+    };
+
+    // Control: a navigation the user makes here still gets the site's prompt.
+    await makePrompting();
+    await page.evaluate(() => { location.assign(location.href.replace(`/long-article`, `/page2`)) });
+    await page.waitForURL(/\/page2$/, { timeout: 10_000 });
+    expect(dialogs).toEqual([`beforeunload`]);
+
+    await page.goto(url);
+    await setSync(page, sessionId, `live`);
+    await page.waitForTimeout(500); // let join() settle
+    await makePrompting();
+    await page.evaluate(async ([sid, u]) => {
+      await fetch(`/__session-state`, {
+        method: `POST`,
+        headers: { 'Content-Type': `application/json` },
+        body: JSON.stringify({ sessionId: sid, clientId: `device-b`, url: u, anchor: null, deviceLabel: `B`, claimDriver: true }),
+      });
+    }, [sessionId, `http://localhost:38080/page2`] as const);
+    await page.waitForURL(/\/page2$/, { timeout: 10_000 });
+    expect(dialogs).toEqual([`beforeunload`]);
+  });
 });
