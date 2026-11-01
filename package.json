@@ -1,6 +1,6 @@
 {
   "name": "web-syncr",
-  "version": "7.3.1",
+  "version": "7.3.2",
   "description": "",
   "license": "ISC",
   "author": "zacaj",
@@ -13,7 +13,6 @@
     "test:live:magicurl": "LIVE_MAGICURL=http://100.111.42.92:3005 playwright test tests/live-sites.spec.ts",
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
-
     "docker:build": "docker build -t web-syncr --target dev --progress=plain .",
     "docker:build:prod": "docker build -t web-syncr --progress=plain --target prod .",
     "docker:run": "docker run -p 39443:443 web-syncr",
@@ -39,9 +38,7 @@
     "@hono/node-server": "^1.19",
     "hono": "^4",
     "http-proxy-middleware": "^3",
-
     "@zacaj/util": "^0.1.1",
-
     "preact": "^10",
     "preact-render-to-string": "^6"
   },
@@ -50,7 +47,6 @@
     "eslint": "^10.4.0",
     "eslint-plugin-json": "*",
     "typescript-eslint": "^8",
-
     "@types/node": "^24",
     "better-typescript-lib": "^2.12.0",
     "@typescript/lib-decorators": "npm:@better-typescript-lib/decorators@^2.12.0",
@@ -73,7 +69,6 @@
     "release-it": "^20.2.0",
     "tsx": "^4",
     "typescript": "^5.9",
-
     "@playwright/test": "^1.60.0",
     "undici-types": "^8.3.0"
   },
