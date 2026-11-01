@@ -9,6 +9,8 @@
 # Branch protection on main + the `ci` topic are added by zacaj/renovate's bootstrap-repos.mjs,
 # which expects this workflow to be named `ci` with a `test` job.
 name: ci
+# email the run's triggerer + repo owner when it fails (needs Forgejo's [mailer]; off by default)
+enable-email-notifications: true
 
 on:
   push:
