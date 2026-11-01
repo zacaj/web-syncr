@@ -35,7 +35,7 @@ jobs:
     if: github.event_name != 'workflow_dispatch'
     runs-on: docker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -77,7 +77,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: docker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve version
         id: ver
