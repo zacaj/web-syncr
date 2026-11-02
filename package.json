@@ -35,7 +35,7 @@
   },
   "type": "module",
   "dependencies": {
-    "@hono/node-server": "^1.19",
+    "@hono/node-server": "^2.0.0",
     "hono": "^4",
     "http-proxy-middleware": "^3",
     "@zacaj/util": "^0.1.1",
