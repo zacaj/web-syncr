@@ -6,6 +6,7 @@
 # Secrets (user-level on git.zacaj.com): NPM_TOKEN (npm.zacaj.com, for @zacaj/*),
 # REGISTRY_USER / REGISTRY_PASSWORD (docker.zacaj.com), DEPLOY_SSH_KEY (key restricted on the
 # VPS to ~/ci-deploy/ci-deploy.sh: `deploy <app> <version>`, which health-checks + rolls back).
+# RELEASE_TOKEN (renovate_bot's PAT; the `release` job pushes release-it's tag with it).
 # Branch protection on main + the `ci` topic are added by zacaj/renovate's bootstrap-repos.mjs,
 # which expects this workflow to be named `ci` with a `test` job.
 name: ci
@@ -73,6 +74,51 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 14
+
+  # After a Renovate update lands on main and passes `test`, cut a patch release: release-it bumps
+  # the version, commits, tags vX.Y.Z and pushes, and that tag push runs publish + deploy below.
+  # It pushes with RELEASE_TOKEN (renovate_bot's PAT) because Forgejo doesn't start workflows from
+  # pushes made with a job's own token. Your own pushes to main never release by themselves.
+  release:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # release-it needs the tags to find the previous version
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Was this a Renovate update?
+        id: renovate
+        run: |
+          # the merged PR's commits (2nd parent of a merge commit), else the pushed commit itself;
+          # covers automerged PRs and majors merged by hand. Skips release-it's own commit.
+          author="$(git log -1 --format=%ae HEAD^2 2>/dev/null || git log -1 --format=%ae HEAD)"
+          subject="$(git log -1 --format=%s HEAD)"
+          case "$subject" in "chore: release v"*) author=release ;; esac
+          if [ "$author" = renovate_bot@zacaj.com ]; then
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "not a Renovate update ($author: $subject); no release"
+          fi
+
+      - if: steps.renovate.outputs.yes == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Release a patch version
+        if: steps.renovate.outputs.yes == 'true'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//npm.zacaj.com/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          npm i -g pnpm@11
+          pnpm install --frozen-lockfile
+          git config user.name "Renovate Bot"
+          git config user.email renovate_bot@zacaj.com
+          pnpm release:patch
 
   publish:
     needs: test
